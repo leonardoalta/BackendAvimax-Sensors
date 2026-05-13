@@ -9,6 +9,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * NH3Controller - Desarrollado por Uriel Martínez
+ * Gestiona las lecturas de amoníaco (ppm - partes por millón).
+ * Validación: rango 0-50 ppm (umbral crítico de salud).
+ */
 @RestController
 @RequestMapping("/api/nh3")
 public class NH3Controller {
