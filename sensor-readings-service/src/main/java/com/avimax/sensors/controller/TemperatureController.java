@@ -9,6 +9,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * TemperatureController - Desarrollado por Leonardo Rodríguez
+ * Gestiona las lecturas de temperatura (°C).
+ * Rango normal para aves: 18-28°C. Umbrales de alerta: <15°C y >35°C.
+ */
 @RestController
 @RequestMapping("/api/temperature")
 public class TemperatureController {
