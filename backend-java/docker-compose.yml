@@ -1,0 +1,15 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: avimax-timescaledb
+    environment:
+      POSTGRES_DB: avimax
+      POSTGRES_USER: avimax
+      POSTGRES_PASSWORD: avimax
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+
+volumes:
+  timescaledb_data:

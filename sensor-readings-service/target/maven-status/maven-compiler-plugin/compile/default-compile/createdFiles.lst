@@ -1,0 +1,13 @@
+com/avimax/sensors/repository/HumidityReadingRepository.class
+com/avimax/sensors/repository/TemperatureReadingRepository.class
+com/avimax/sensors/controller/HumidityController.class
+com/avimax/sensors/entity/NH3Reading.class
+com/avimax/sensors/entity/TemperatureReading.class
+com/avimax/sensors/controller/NH3Controller.class
+com/avimax/sensors/entity/HumidityReading.class
+com/avimax/sensors/dto/CreateTemperatureReadingRequest.class
+com/avimax/sensors/controller/TemperatureController.class
+com/avimax/sensors/repository/NH3ReadingRepository.class
+com/avimax/sensors/dto/CreateHumidityReadingRequest.class
+com/avimax/sensors/SensorReadingsServiceApplication.class
+com/avimax/sensors/dto/CreateNH3ReadingRequest.class

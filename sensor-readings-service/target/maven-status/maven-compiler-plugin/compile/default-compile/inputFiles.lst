@@ -1,0 +1,13 @@
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/SensorReadingsServiceApplication.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/controller/HumidityController.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/controller/NH3Controller.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/controller/TemperatureController.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/dto/CreateHumidityReadingRequest.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/dto/CreateNH3ReadingRequest.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/dto/CreateTemperatureReadingRequest.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/entity/HumidityReading.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/entity/NH3Reading.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/entity/TemperatureReading.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/repository/HumidityReadingRepository.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/repository/NH3ReadingRepository.java
+/home/leo/AviMaxBack/sensor-readings-service/src/main/java/com/avimax/sensors/repository/TemperatureReadingRepository.java
