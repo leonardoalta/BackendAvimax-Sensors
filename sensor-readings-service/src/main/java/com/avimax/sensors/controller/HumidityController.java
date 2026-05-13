@@ -9,6 +9,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * HumidityController - Desarrollado por Oscar Hernández
+ * Gestiona las lecturas de humedad relativa (%).
+ * Validación: rango 0-100%.
+ */
 @RestController
 @RequestMapping("/api/humidity")
 public class HumidityController {
