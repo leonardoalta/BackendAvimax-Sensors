@@ -4,7 +4,7 @@ spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/avimax
     username: ${DB_USERNAME:avimax}
-    password: ${DB_PASSWORD:avim}
+    password: ${DB_PASSWORD:avimax}
   jpa:
     hibernate:
       ddl-auto: update

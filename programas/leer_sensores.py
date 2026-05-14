@@ -26,9 +26,9 @@ TIMEOUT = 1
 POLL_INTERVAL = 5  # segundos
 
 # Activa esto cuando ya quieras publicar al broker
-ENABLE_MQTT = False
+ENABLE_MQTT = True
 
-MQTT_BROKER = "broker.hivemq.com"   # cámbialo por tu broker real
+MQTT_BROKER = "localhost"   # Broker MQTT local
 MQTT_PORT = 1883
 MQTT_TOPIC = "avicola/galpon1/lecturas"
 MQTT_CLIENT_ID = "raspi5-lector-01"
