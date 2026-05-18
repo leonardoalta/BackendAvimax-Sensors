@@ -27,6 +27,9 @@ management:
 app:
   mqtt:
     enabled: true
+    # Usa MQTT_BROKER_URL si está seteada, sino detecta automáticamente
+    # - Docker: tcp://172.17.0.1:1883 (gateway del host)
+    # - Local: tcp://localhost:1883
     broker-url: ${MQTT_BROKER_URL:tcp://localhost:1883}
     client-id: avimax-backend-01
     topic: ${MQTT_TOPIC:avicola/galpon1/lecturas}
@@ -35,3 +38,4 @@ app:
     qos: 1
     connection-timeout-seconds: 10
     keep-alive-seconds: 60
+

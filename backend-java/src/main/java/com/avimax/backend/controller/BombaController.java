@@ -1,5 +1,6 @@
 package com.avimax.backend.controller;
 
+import com.avimax.backend.dto.ApiResponse;
 import com.avimax.backend.dto.BombaItemResponse;
 import com.avimax.backend.dto.ConfigureBombaProgrammingRequest;
 import com.avimax.backend.dto.CreateBombaRequest;
@@ -28,24 +29,24 @@ public class BombaController {
     }
 
     @PostMapping
-    public ResponseEntity<BombaItemResponse> create(@Valid @RequestBody CreateBombaRequest request) {
+    public ResponseEntity<ApiResponse<BombaItemResponse>> create(@Valid @RequestBody CreateBombaRequest request) {
         var created = bombaService.create(request);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(BombaItemResponse.from(created, null));
+                .body(ApiResponse.success(BombaItemResponse.from(created, null)));
     }
 
     @GetMapping
-    public List<BombaItemResponse> list() {
-        return bombaService.listWithProgramming();
+    public ApiResponse<List<BombaItemResponse>> list() {
+        return ApiResponse.success(bombaService.listWithProgramming());
     }
 
     @PutMapping("/{bombaId}/programming")
-    public BombaItemResponse updateProgramming(
+    public ApiResponse<BombaItemResponse> updateProgramming(
             @PathVariable Long bombaId,
             @Valid @RequestBody ConfigureBombaProgrammingRequest request
     ) {
         var programming = bombaService.configureProgramming(bombaId, request);
-        return BombaItemResponse.from(programming.getBomba(), programming);
+        return ApiResponse.success(BombaItemResponse.from(programming.getBomba(), programming));
     }
 
     @GetMapping("/{bombaId}/history")

@@ -1,5 +1,6 @@
 package com.avimax.backend.controller;
 
+import com.avimax.backend.dto.ApiResponse;
 import com.avimax.backend.dto.SensorReadingResponse;
 import com.avimax.backend.service.SensorReadingService;
 import java.util.List;
@@ -19,18 +20,20 @@ public class ReadingController {
     }
 
     @GetMapping("/latest")
-    public ResponseEntity<SensorReadingResponse> latest() {
+    public ResponseEntity<ApiResponse<SensorReadingResponse>> latest() {
         return sensorReadingService.getLatestReading()
                 .map(SensorReadingResponse::fromEntity)
+                .map(ApiResponse::success)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     @GetMapping("/recent")
-    public List<SensorReadingResponse> recent() {
-        return sensorReadingService.getRecentReadings()
+    public ApiResponse<List<SensorReadingResponse>> recent() {
+        List<SensorReadingResponse> readings = sensorReadingService.getRecentReadings()
                 .stream()
                 .map(SensorReadingResponse::fromEntity)
                 .toList();
+        return ApiResponse.success(readings);
     }
 }

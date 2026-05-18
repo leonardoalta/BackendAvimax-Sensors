@@ -1,0 +1,10 @@
+FROM postgres:15
+
+ENV POSTGRES_USER=avimax
+ENV POSTGRES_PASSWORD=avimax
+ENV POSTGRES_DB=avimax
+
+# Copy initialization scripts if needed (optional)
+# COPY init.sql /docker-entrypoint-initdb.d/
+
+EXPOSE 5432

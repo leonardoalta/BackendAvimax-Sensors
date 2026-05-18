@@ -95,11 +95,12 @@ public class MqttWebSocketBridgeService {
 
             client.connect(options);
 
-            // subscribe to actuator topics and aggregate
+            // subscribe to actuator topics, aggregated state and alarm alerts
             client.subscribe("avimax/actuator/+/+/state", mqttProperties.qos());
             client.subscribe("avimax/actuators/state", mqttProperties.qos());
+            client.subscribe("avimax/galpon1/alertas", mqttProperties.qos());
 
-            log.info("MQTT↔WS bridge conectado a {} — suscrito a topics de actuadores", mqttProperties.brokerUrl());
+            log.info("MQTT↔WS bridge conectado a {} — suscrito a topics de actuadores y alertas", mqttProperties.brokerUrl());
         } catch (Exception e) {
             throw new IllegalStateException("No fue posible iniciar MQTT↔WS bridge", e);
         }

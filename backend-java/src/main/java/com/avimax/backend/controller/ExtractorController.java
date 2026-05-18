@@ -1,5 +1,6 @@
 package com.avimax.backend.controller;
 
+import com.avimax.backend.dto.ApiResponse;
 import com.avimax.backend.dto.ConfigureExtractorProgrammingRequest;
 import com.avimax.backend.dto.CreateExtractorRequest;
 import com.avimax.backend.dto.ExtractorItemResponse;
@@ -28,24 +29,24 @@ public class ExtractorController {
     }
 
     @PostMapping
-    public ResponseEntity<ExtractorItemResponse> create(@Valid @RequestBody CreateExtractorRequest request) {
+    public ResponseEntity<ApiResponse<ExtractorItemResponse>> create(@Valid @RequestBody CreateExtractorRequest request) {
         var created = extractorService.create(request);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ExtractorItemResponse.from(created, null));
+                .body(ApiResponse.success(ExtractorItemResponse.from(created, null)));
     }
 
     @GetMapping
-    public List<ExtractorItemResponse> list() {
-        return extractorService.listWithProgramming();
+    public ApiResponse<List<ExtractorItemResponse>> list() {
+        return ApiResponse.success(extractorService.listWithProgramming());
     }
 
     @PutMapping("/{extractorId}/programming")
-    public ExtractorItemResponse updateProgramming(
+    public ApiResponse<ExtractorItemResponse> updateProgramming(
             @PathVariable Long extractorId,
             @Valid @RequestBody ConfigureExtractorProgrammingRequest request
     ) {
         var programming = extractorService.configureProgramming(extractorId, request);
-        return ExtractorItemResponse.from(programming.getExtractor(), programming);
+        return ApiResponse.success(ExtractorItemResponse.from(programming.getExtractor(), programming));
     }
 
     @GetMapping("/{extractorId}/history")

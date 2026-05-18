@@ -19,11 +19,16 @@ public class SensorReadingService {
     private final SensorReadingRepository sensorReadingRepository;
     private final FlockService flockService;
     private final ActuatorControlService actuatorControlService;
+    private final AlarmEvaluationService alarmEvaluationService;
 
-    public SensorReadingService(SensorReadingRepository sensorReadingRepository, FlockService flockService, ActuatorControlService actuatorControlService) {
+    public SensorReadingService(SensorReadingRepository sensorReadingRepository,
+                                FlockService flockService,
+                                ActuatorControlService actuatorControlService,
+                                AlarmEvaluationService alarmEvaluationService) {
         this.sensorReadingRepository = sensorReadingRepository;
         this.flockService = flockService;
         this.actuatorControlService = actuatorControlService;
+        this.alarmEvaluationService = alarmEvaluationService;
     }
 
     @Transactional
@@ -45,6 +50,7 @@ public class SensorReadingService {
         );
 
         SensorReading saved = sensorReadingRepository.save(reading);
+        alarmEvaluationService.evaluate(saved);
         actuatorControlService.evaluateAndQueue(saved);
         return Optional.of(saved);
     }

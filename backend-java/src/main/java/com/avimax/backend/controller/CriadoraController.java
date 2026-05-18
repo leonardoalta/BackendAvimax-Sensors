@@ -1,5 +1,6 @@
 package com.avimax.backend.controller;
 
+import com.avimax.backend.dto.ApiResponse;
 import com.avimax.backend.dto.ConfigureCriadoraProgrammingRequest;
 import com.avimax.backend.dto.CriadoraItemResponse;
 import com.avimax.backend.dto.CreateCriadoraRequest;
@@ -28,24 +29,24 @@ public class CriadoraController {
     }
 
     @PostMapping
-    public ResponseEntity<CriadoraItemResponse> create(@Valid @RequestBody CreateCriadoraRequest request) {
+    public ResponseEntity<ApiResponse<CriadoraItemResponse>> create(@Valid @RequestBody CreateCriadoraRequest request) {
         var created = criadoraService.create(request);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(CriadoraItemResponse.from(created, null));
+                .body(ApiResponse.success(CriadoraItemResponse.from(created, null)));
     }
 
     @GetMapping
-    public List<CriadoraItemResponse> list() {
-        return criadoraService.listWithProgramming();
+    public ApiResponse<List<CriadoraItemResponse>> list() {
+        return ApiResponse.success(criadoraService.listWithProgramming());
     }
 
     @PutMapping("/{criadoraId}/programming")
-    public CriadoraItemResponse updateProgramming(
+    public ApiResponse<CriadoraItemResponse> updateProgramming(
             @PathVariable Long criadoraId,
             @Valid @RequestBody ConfigureCriadoraProgrammingRequest request
     ) {
         var programming = criadoraService.configureProgramming(criadoraId, request);
-        return CriadoraItemResponse.from(programming.getCriadora(), programming);
+        return ApiResponse.success(CriadoraItemResponse.from(programming.getCriadora(), programming));
     }
 
     @GetMapping("/{criadoraId}/history")
