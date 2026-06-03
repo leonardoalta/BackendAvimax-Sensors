@@ -1,3 +1,4 @@
+
 # AviMax - Guía de Integración Frontend para Alarmas
 
 Este documento define únicamente la integración por REST API para el frontend.
