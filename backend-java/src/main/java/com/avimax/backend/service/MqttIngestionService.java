@@ -1,6 +1,7 @@
 package com.avimax.backend.service;
 
 import com.avimax.backend.config.MqttProperties;
+import com.avimax.backend.dto.MqttStatusResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -9,6 +10,9 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
 import org.eclipse.paho.client.mqttv3.MqttClient;
@@ -43,6 +47,11 @@ public class MqttIngestionService implements MqttCallbackExtended {
     private final MqttProperties mqttProperties;
 
     private MqttClient client;
+    private final AtomicBoolean connected = new AtomicBoolean(false);
+    private final AtomicLong totalMessagesReceived = new AtomicLong(0);
+    private final AtomicReference<OffsetDateTime> lastMessageReceivedAt = new AtomicReference<>(null);
+    private final AtomicReference<String> lastError = new AtomicReference<>(null);
+    private final AtomicReference<OffsetDateTime> lastErrorAt = new AtomicReference<>(null);
 
     public MqttIngestionService(ObjectMapper objectMapper, SensorReadingService sensorReadingService, MqttProperties mqttProperties) {
         this.objectMapper = objectMapper;
@@ -71,8 +80,14 @@ public class MqttIngestionService implements MqttCallbackExtended {
 
             client.connect(options);
             client.subscribe(mqttProperties.topic(), mqttProperties.qos());
+            connected.set(true);
+            lastError.set(null);
+            lastErrorAt.set(null);
             log.info("MQTT conectado y suscrito a {}", mqttProperties.topic());
         } catch (Exception e) {
+            connected.set(false);
+            lastError.set(e.getMessage());
+            lastErrorAt.set(OffsetDateTime.now(ZoneOffset.UTC));
             throw new IllegalStateException("No fue posible iniciar la suscripción MQTT", e);
         }
     }
@@ -93,19 +108,29 @@ public class MqttIngestionService implements MqttCallbackExtended {
 
     @Override
     public void connectComplete(boolean reconnect, String serverURI) {
+        connected.set(true);
+        lastError.set(null);
+        lastErrorAt.set(null);
         log.info("Conexión MQTT completa. reconnect={}, serverURI={}", reconnect, serverURI);
     }
 
     @Override
     public void connectionLost(Throwable cause) {
+        connected.set(false);
+        lastError.set(cause != null ? cause.getMessage() : "Conexión perdida");
+        lastErrorAt.set(OffsetDateTime.now(ZoneOffset.UTC));
         log.warn("Conexión MQTT perdida", cause);
     }
 
     @Override
     public void messageArrived(String topic, MqttMessage message) {
         try {
+            lastMessageReceivedAt.set(OffsetDateTime.now(ZoneOffset.UTC));
+            totalMessagesReceived.incrementAndGet();
             processPayload(topic, new String(message.getPayload()));
         } catch (Exception e) {
+            lastError.set(e.getMessage());
+            lastErrorAt.set(OffsetDateTime.now(ZoneOffset.UTC));
             log.error("Error procesando mensaje MQTT", e);
         }
     }
@@ -113,6 +138,28 @@ public class MqttIngestionService implements MqttCallbackExtended {
     @Override
     public void deliveryComplete(IMqttDeliveryToken token) {
         // No aplica porque este backend solo consume lecturas.
+    }
+
+    public MqttStatusResponse getStatus() {
+        String status;
+        if (connected.get()) {
+            status = MqttStatusResponse.ConnectionStatus.CONNECTED.name();
+        } else if (lastError.get() != null) {
+            status = MqttStatusResponse.ConnectionStatus.CONNECTING_ERROR.name();
+        } else {
+            status = MqttStatusResponse.ConnectionStatus.DISCONNECTED.name();
+        }
+
+        return new MqttStatusResponse(
+                connected.get(),
+                mqttProperties.topic(),
+                lastMessageReceivedAt.get(),
+                totalMessagesReceived.get(),
+                status,
+                lastError.get(),
+                lastErrorAt.get(),
+                mqttProperties.brokerUrl()
+        );
     }
 
     private void processPayload(String topic, String payload) throws Exception {
