@@ -14,9 +14,15 @@ public class SensorReadingSpecification {
             OffsetDateTime end,
             String variable,
             String gateway,
-            String sensor) {
+            String sensor,
+            Long flockId) {
         return (root, query, cb) -> {
             var predicates = new java.util.ArrayList<Predicate>();
+
+            // Filtro por parvada (obligatorio para aislar datos)
+            if (flockId != null && flockId > 0) {
+                predicates.add(cb.equal(root.get("flock").get("id"), flockId));
+            }
 
             // Filtro de rango de fechas
             if (start != null) {

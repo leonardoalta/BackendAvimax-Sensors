@@ -96,7 +96,12 @@ public class SensorReadingService {
         }
 
         var pageable = PageRequest.of(page, size, Sort.by(direction, sortField));
-        var spec = SensorReadingSpecification.withFilters(start, end, variable, gateway, sensor);
+        
+        // Obtener parvada activa y filtrar por ella
+        Optional<Flock> activeFlock = flockService.getActiveFlock();
+        Long flockId = activeFlock.map(Flock::getId).orElse(null);
+        
+        var spec = SensorReadingSpecification.withFilters(start, end, variable, gateway, sensor, flockId);
 
         return sensorReadingRepository.findAll(spec, pageable);
     }
