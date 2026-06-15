@@ -102,7 +102,7 @@ public class MqttWebSocketBridgeService {
 
             log.info("MQTT↔WS bridge conectado a {} — suscrito a topics de actuadores y alertas", mqttProperties.brokerUrl());
         } catch (Exception e) {
-            throw new IllegalStateException("No fue posible iniciar MQTT↔WS bridge", e);
+            log.warn("[WsBridge] No se pudo conectar al iniciar (se reintentará cuando haya conexión): {}", e.getMessage());
         }
     }
 

@@ -58,7 +58,7 @@ public class AlarmMqttPublisherService {
             client.connect(options);
             log.info("MQTT alarm publisher conectado a {}", mqttProperties.brokerUrl());
         } catch (Exception e) {
-            throw new IllegalStateException("No fue posible iniciar el publicador MQTT de alarmas", e);
+            log.warn("[AlarmMqtt] No se pudo conectar al iniciar (se reintentará cuando haya conexión): {}", e.getMessage());
         }
     }
 

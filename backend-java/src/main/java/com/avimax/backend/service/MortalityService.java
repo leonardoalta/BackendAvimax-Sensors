@@ -18,10 +18,14 @@ public class MortalityService {
 
     private final MortalityRecordRepository mortalityRecordRepository;
     private final FlockRepository flockRepository;
+    private final LocalSyncMqttPublisherService syncPublisher;
 
-    public MortalityService(MortalityRecordRepository mortalityRecordRepository, FlockRepository flockRepository) {
+    public MortalityService(MortalityRecordRepository mortalityRecordRepository,
+                            FlockRepository flockRepository,
+                            LocalSyncMqttPublisherService syncPublisher) {
         this.mortalityRecordRepository = mortalityRecordRepository;
         this.flockRepository = flockRepository;
+        this.syncPublisher = syncPublisher;
     }
 
     @Transactional
@@ -39,20 +43,24 @@ public class MortalityService {
         MortalityRecord record = new MortalityRecord(flock, request.maleCount(), request.femaleCount(), request.observations());
         MortalityRecord saved = mortalityRecordRepository.save(record);
 
-        // actualizar conteos de la parvada
         flock.reduceCounts(request.maleCount(), request.femaleCount());
         flockRepository.save(flock);
 
+        syncPublisher.publishMortalityRecorded(saved, flock.getId());
         return saved;
     }
 
     @Transactional(readOnly = true)
     public List<MortalityRecord> listAll() {
-        return mortalityRecordRepository.findAllByOrderByRecordDateDesc();
+        Flock flock = flockRepository.findFirstByStatus(com.avimax.backend.entity.FlockStatus.ACTIVE)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No hay parvada activa para consultar la mortalidad"));
+        return mortalityRecordRepository.findByFlockIdOrderByRecordDateDesc(flock.getId());
     }
 
     @Transactional(readOnly = true)
     public List<MortalityRecord> listBetween(java.time.LocalDate from, java.time.LocalDate to) {
-        return mortalityRecordRepository.findByRecordDateBetweenOrderByRecordDateDesc(from, to);
+        Flock flock = flockRepository.findFirstByStatus(com.avimax.backend.entity.FlockStatus.ACTIVE)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No hay parvada activa para consultar la mortalidad"));
+        return mortalityRecordRepository.findByFlockIdAndRecordDateBetweenOrderByRecordDateDesc(flock.getId(), from, to);
     }
 }

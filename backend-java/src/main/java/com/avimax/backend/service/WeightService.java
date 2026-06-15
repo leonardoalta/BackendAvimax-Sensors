@@ -25,6 +25,9 @@ public class WeightService {
     @Autowired
     private FlockRepository flockRepository;
 
+    @Autowired
+    private LocalSyncMqttPublisherService syncPublisher;
+
     /**
      * Create a new weight record for the active flock
      */
@@ -65,6 +68,7 @@ public class WeightService {
         );
 
         WeightRecord saved = weightRecordRepository.save(weightRecord);
+        syncPublisher.publishWeightRecorded(saved, activeFlock.getId());
         return convertToResponse(saved);
     }
 

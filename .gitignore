@@ -1,0 +1,19 @@
+# Excluir backend central (tiene su propio repo/stack Docker)
+avimax-central-backend/
+
+# Compilados Java
+target/
+*.class
+*.jar
+*.jar.original
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+
+# Logs
+*.log

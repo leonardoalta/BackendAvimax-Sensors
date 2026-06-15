@@ -19,10 +19,14 @@ public class ConsumptionService {
 
     private final ConsumptionRecordRepository consumptionRecordRepository;
     private final FlockRepository flockRepository;
+    private final LocalSyncMqttPublisherService syncPublisher;
 
-    public ConsumptionService(ConsumptionRecordRepository consumptionRecordRepository, FlockRepository flockRepository) {
+    public ConsumptionService(ConsumptionRecordRepository consumptionRecordRepository,
+                              FlockRepository flockRepository,
+                              LocalSyncMqttPublisherService syncPublisher) {
         this.consumptionRecordRepository = consumptionRecordRepository;
         this.flockRepository = flockRepository;
+        this.syncPublisher = syncPublisher;
     }
 
     @Transactional
@@ -55,12 +59,17 @@ public class ConsumptionService {
                 consumptionPerBirdKg
         );
 
-        return consumptionRecordRepository.save(record);
+        ConsumptionRecord saved = consumptionRecordRepository.save(record);
+        syncPublisher.publishConsumptionRecorded(saved, flock.getId());
+        return saved;
     }
 
     @Transactional(readOnly = true)
     public List<ConsumptionResponse> listAll() {
-        return consumptionRecordRepository.findAllByOrderByRecordDateDesc()
+        Flock flock = flockRepository.findFirstByStatus(FlockStatus.ACTIVE)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No hay parvada activa para consultar el consumo"));
+
+        return consumptionRecordRepository.findByFlockIdOrderByRecordDateDesc(flock.getId())
                 .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());

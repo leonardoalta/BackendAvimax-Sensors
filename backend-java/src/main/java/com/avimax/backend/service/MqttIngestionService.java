@@ -88,7 +88,7 @@ public class MqttIngestionService implements MqttCallbackExtended {
             connected.set(false);
             lastError.set(e.getMessage());
             lastErrorAt.set(OffsetDateTime.now(ZoneOffset.UTC));
-            throw new IllegalStateException("No fue posible iniciar la suscripción MQTT", e);
+            log.warn("[Ingestion] No se pudo conectar al iniciar (se reintentará cuando haya conexión): {}", e.getMessage());
         }
     }
 

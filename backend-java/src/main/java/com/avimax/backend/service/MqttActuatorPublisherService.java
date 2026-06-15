@@ -82,7 +82,7 @@ public class MqttActuatorPublisherService {
             publishCurrentStateSnapshot();
             log.info("MQTT actuator publisher conectado a {}", mqttProperties.brokerUrl());
         } catch (Exception e) {
-            throw new IllegalStateException("No fue posible iniciar el publicador MQTT de actuadores", e);
+            log.warn("[ActuatorMqtt] No se pudo conectar al iniciar (se reintentará cuando haya conexión): {}", e.getMessage());
         }
     }
 

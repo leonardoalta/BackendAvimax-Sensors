@@ -25,6 +25,9 @@ management:
         include: health,info,metrics
 
 app:
+  galpon-id: ${GALPON_ID:1}
+  gateway-id: ${GATEWAY_ID:raspi5-galpon-01}
+
   mqtt:
     enabled: true
     # Usa MQTT_BROKER_URL si está seteada, sino detecta automáticamente
@@ -39,3 +42,15 @@ app:
     connection-timeout-seconds: 10
     keep-alive-seconds: 60
 
+    outbox:
+      enabled: ${MQTT_OUTBOX_ENABLED:true}
+      retry-interval-ms: ${MQTT_OUTBOX_RETRY_INTERVAL_MS:10000}
+      max-attempts: ${MQTT_OUTBOX_MAX_ATTEMPTS:20}
+      batch-size: ${MQTT_OUTBOX_BATCH_SIZE:50}
+
+  retry:
+    enabled: ${MQTT_RETRY_ENABLED:true}
+    interval-ms: ${MQTT_RETRY_INTERVAL_MS:15000}
+    command-timeout-seconds: ${MQTT_COMMAND_TIMEOUT_SECONDS:30}
+    programming-timeout-seconds: ${MQTT_PROGRAMMING_TIMEOUT_SECONDS:30}
+    max-attempts: ${MQTT_MAX_ATTEMPTS:10}
