@@ -7,6 +7,7 @@ import java.time.OffsetDateTime;
 public record ExtractorItemResponse(
         Long id,
         String name,
+        String codeName,
         boolean enabled,
         OffsetDateTime createdAt,
         Double temperatureOn,
@@ -17,6 +18,7 @@ public record ExtractorItemResponse(
         return new ExtractorItemResponse(
                 extractor.getId(),
                 extractor.getName(),
+                extractor.getCodeName(),
                 extractor.isEnabled(),
                 extractor.getCreatedAt(),
                 programming != null ? programming.getTemperatureOn() : null,

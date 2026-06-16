@@ -7,6 +7,7 @@ import java.time.OffsetDateTime;
 public record CriadoraItemResponse(
         Long id,
         String name,
+        String codeName,
         boolean enabled,
         OffsetDateTime createdAt,
         Double temperatureOn,
@@ -17,6 +18,7 @@ public record CriadoraItemResponse(
         return new CriadoraItemResponse(
                 criadora.getId(),
                 criadora.getName(),
+                criadora.getCodeName(),
                 criadora.isEnabled(),
                 criadora.getCreatedAt(),
                 programming != null ? programming.getTemperatureOn() : null,

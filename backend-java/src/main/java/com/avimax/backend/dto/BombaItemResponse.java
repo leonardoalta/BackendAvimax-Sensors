@@ -7,6 +7,7 @@ import java.time.OffsetDateTime;
 public record BombaItemResponse(
         Long id,
         String name,
+        String codeName,
         boolean enabled,
         OffsetDateTime createdAt,
         Double temperatureOn,
@@ -18,6 +19,7 @@ public record BombaItemResponse(
         return new BombaItemResponse(
                 bomba.getId(),
                 bomba.getName(),
+                bomba.getCodeName(),
                 bomba.isEnabled(),
                 bomba.getCreatedAt(),
                 programming != null ? programming.getTemperatureOn() : null,

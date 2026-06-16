@@ -115,11 +115,14 @@ public class LocalSyncMqttPublisherService {
         publishOrQueue(syncTopic("consumption"), payload, "SYNC_CONSUMPTION");
     }
 
-    public void publishActuatorStateChanged(ActuatorControlState state, String triggeredBy,
-                                             Integer workDurationSeconds) {
+    /** Publica cambio de estado con codeName para que central identifique el actuador correctamente. */
+    public void publishActuatorStateChanged(ActuatorControlState state, String codeName,
+                                             String triggeredBy, Integer workDurationSeconds) {
         Map<String, Object> payload = basePayload("ACTUATOR_STATE_CHANGED", null, null);
         payload.put("actuatorType", state.getActuatorType());
-        payload.put("actuatorId", state.getActuatorId());
+        payload.put("localActuatorId", state.getActuatorId());
+        payload.put("actuatorId", state.getActuatorId()); // backward compat
+        payload.put("codeName", codeName);
         payload.put("actuatorName", state.getActuatorName());
         payload.put("state", state.isCurrentState());
         payload.put("command", state.isCurrentState() ? "ON" : "OFF");
@@ -128,6 +131,12 @@ public class LocalSyncMqttPublisherService {
         payload.put("changedAt", str(state.getLastUpdatedAt()));
         payload.put(FIELD_SYNCED_AT, OffsetDateTime.now().toString());
         publishOrQueue(syncTopic("actuator-state"), payload, "SYNC_ACTUATOR_STATE");
+    }
+
+    /** Overload sin codeName para callers internos que no disponen de él (legacy). */
+    public void publishActuatorStateChanged(ActuatorControlState state, String triggeredBy,
+                                             Integer workDurationSeconds) {
+        publishActuatorStateChanged(state, null, triggeredBy, workDurationSeconds);
     }
 
     private void publishOrQueue(String topic, Map<String, Object> payload, String messageType) {

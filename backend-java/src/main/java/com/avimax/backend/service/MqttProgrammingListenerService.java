@@ -34,12 +34,21 @@ public class MqttProgrammingListenerService {
     private static final Logger log = LoggerFactory.getLogger(MqttProgrammingListenerService.class);
     private static final int QOS = 1;
     private static final boolean RETAINED = false;
-    private static final String STATUS_APPLIED    = "APPLIED";
-    private static final String STATUS_ERROR      = "ERROR";
+    private static final String STATUS_APPLIED           = "APPLIED";
+    private static final String STATUS_ERROR             = "ERROR";
     private static final int DEFAULT_WORK_DURATION_SECONDS = 60;
-    private static final String FIELD_CONFIG_ID   = "configId";
-    private static final String FIELD_GALPON_ID   = "galponId";
-    private static final String FIELD_ACTUATOR_ID = "actuatorId";
+    private static final String FIELD_CONFIG_ID           = "configId";
+    private static final String FIELD_GALPON_ID           = "galponId";
+    private static final String FIELD_ACTUATOR_ID         = "actuatorId";        // backward compat
+    private static final String FIELD_CENTRAL_ACTUATOR_ID = "centralActuatorId";
+    private static final String FIELD_LOCAL_ACTUATOR_ID   = "localActuatorId";
+
+    /** Agrupa los campos del ACK de programación para reducir la cantidad de parámetros. */
+    private record ProgrammingAck(
+            Long configId, Long galponId, String actuatorType,
+            Long centralActuatorId, String codeName, Long localActuatorId,
+            String status, String message
+    ) {}
 
     private final MqttProperties mqttProperties;
     private final ObjectMapper objectMapper;
@@ -56,6 +65,7 @@ public class MqttProgrammingListenerService {
     @Autowired private BombaProgrammingRepository bombaProgrammingRepository;
     @Autowired private ProcessedProgrammingConfigRepository processedConfigRepository;
     @Autowired private LocalMqttOutboxService outboxService;
+    @Autowired private ActuatorControlService actuatorControlService;
 
     private MqttClient client;
 
@@ -69,8 +79,7 @@ public class MqttProgrammingListenerService {
         try {
             client = new MqttClient(mqttProperties.brokerUrl(),
                     mqttProperties.clientId() + "-prog-listener", new MemoryPersistence());
-            MqttConnectOptions options = buildConnectOptions();
-            client.connect(options);
+            client.connect(buildConnectOptions());
             String topic = "avicola/galpon/" + configuredGalponId + "/config/programming";
             client.subscribe(topic, QOS, this::handleMessage);
             log.info("[ProgListener] Suscrito a {} en {}", topic, mqttProperties.brokerUrl());
@@ -92,77 +101,96 @@ public class MqttProgrammingListenerService {
     private void handleMessage(String topic, MqttMessage message) {
         String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
         try {
-            JsonNode root = objectMapper.readTree(payload);
-            processConfig(root);
+            processConfig(objectMapper.readTree(payload));
         } catch (Exception e) {
             log.error("[ProgListener] JSON inválido en topic {}: {}", topic, e.getMessage());
         }
     }
 
     private void processConfig(JsonNode root) {
-        Long configId   = root.hasNonNull(FIELD_CONFIG_ID)   ? root.get(FIELD_CONFIG_ID).asLong()   : null;
-        Long galponId   = root.hasNonNull(FIELD_GALPON_ID)   ? root.get(FIELD_GALPON_ID).asLong()   : null;
-        String upperType = root.path("actuatorType").asText(null);
-        Long actuatorId  = root.hasNonNull(FIELD_ACTUATOR_ID) ? root.get(FIELD_ACTUATOR_ID).asLong() : null;
-        Double tempOn    = root.hasNonNull("temperatureOn")  ? root.get("temperatureOn").asDouble()  : null;
-        Double tempOff   = root.hasNonNull("temperatureOff") ? root.get("temperatureOff").asDouble() : null;
-        Integer wds      = root.hasNonNull("workDurationSeconds")
+        Long configId          = root.hasNonNull(FIELD_CONFIG_ID)   ? root.get(FIELD_CONFIG_ID).asLong()   : null;
+        Long galponId          = root.hasNonNull(FIELD_GALPON_ID)   ? root.get(FIELD_GALPON_ID).asLong()   : null;
+        String upperType       = root.path("actuatorType").asText(null);
+        Long centralActuatorId = root.hasNonNull(FIELD_ACTUATOR_ID) ? root.get(FIELD_ACTUATOR_ID).asLong() : null;
+        String rawCodeName     = root.path("codeName").asText(null);
+        String codeName        = (rawCodeName != null && !rawCodeName.isBlank()) ? rawCodeName : null;
+        Double tempOn          = root.hasNonNull("temperatureOn")  ? root.get("temperatureOn").asDouble()  : null;
+        Double tempOff         = root.hasNonNull("temperatureOff") ? root.get("temperatureOff").asDouble() : null;
+        Integer wds            = root.hasNonNull("workDurationSeconds")
                 ? root.get("workDurationSeconds").asInt() : null;
 
         if (galponId == null || galponId != configuredGalponId) {
-            log.warn("[ProgListener] galponId {} no coincide con este backend ({}). Ignorando config {}",
+            log.warn("[ProgListener] galponId={} no coincide con este backend ({}). Ignorando config={}",
                     galponId, configuredGalponId, configId);
             return;
         }
 
-        if (upperType == null || actuatorId == null || tempOn == null || tempOff == null) {
-            log.warn("[ProgListener] Payload incompleto en config {} — ignorando", configId);
-            publishAck(configId, galponId, upperType, actuatorId, STATUS_ERROR,
-                    "Payload incompleto: faltan actuatorType, actuatorId, temperatureOn o temperatureOff");
+        if (isPayloadIncomplete(upperType, tempOn, tempOff)) {
+            log.warn("[ProgListener] Payload incompleto en config={}", configId);
+            publishAck(new ProgrammingAck(configId, galponId, null, centralActuatorId, codeName, null,
+                    STATUS_ERROR, "Payload incompleto: faltan actuatorType, temperatureOn o temperatureOff"));
+            return;
+        }
+        upperType = upperType.toUpperCase();
+
+        if (isDuplicateConfig(configId, galponId, upperType, centralActuatorId, codeName)) return;
+
+        // ── Resolución local por codeName (fallback: centralActuatorId) ──────────────
+        Long localActuatorId;
+        try {
+            localActuatorId = actuatorControlService.resolveLocalActuatorId(upperType, centralActuatorId, codeName);
+        } catch (IllegalArgumentException e) {
+            log.warn("[ProgListener] No se pudo resolver actuador para config={}: {}", configId, e.getMessage());
+            publishAck(new ProgrammingAck(configId, galponId, upperType,
+                    centralActuatorId, codeName, null, STATUS_ERROR, e.getMessage()));
             return;
         }
 
-        upperType = upperType.toUpperCase();
-
-        if (isDuplicateConfig(configId, galponId, upperType, actuatorId)) return;
-
-        log.info("[ProgListener] Configuración recibida: {} {} tempOn={} tempOff={}", upperType, actuatorId, tempOn, tempOff);
+        log.info("[ProgListener] Resuelto: centralId={} codeName={} → localId={} | config={} tempOn={} tempOff={}",
+                centralActuatorId, codeName, localActuatorId, configId, tempOn, tempOff);
 
         String ackMessage;
         String ackStatus;
         try {
-            applyProgramming(upperType, actuatorId, tempOn, tempOff, wds);
-            ackMessage = "Programación aplicada en " + upperType + " " + actuatorId;
+            applyProgramming(upperType, localActuatorId, tempOn, tempOff, wds);
+            ackMessage = "Programación aplicada en " + upperType + " " + (codeName != null ? codeName : localActuatorId);
             ackStatus  = STATUS_APPLIED;
         } catch (Exception e) {
-            log.error("[ProgListener] Error aplicando programación {} {}: {}", upperType, actuatorId, e.getMessage());
+            log.error("[ProgListener] Error aplicando programación {} localId={}: {}", upperType, localActuatorId, e.getMessage());
             ackMessage = e.getMessage();
             ackStatus  = STATUS_ERROR;
         }
-        saveProcessedConfig(configId, galponId, upperType, actuatorId, ackStatus, ackMessage);
-        publishAck(configId, galponId, upperType, actuatorId, ackStatus, ackMessage);
+        saveProcessedConfig(configId, galponId, upperType, localActuatorId, ackStatus, ackMessage);
+        publishAck(new ProgrammingAck(configId, galponId, upperType,
+                centralActuatorId, codeName, localActuatorId, ackStatus, ackMessage));
     }
 
-    private boolean isDuplicateConfig(Long configId, Long galponId, String upperType, Long actuatorId) {
+    private boolean isDuplicateConfig(Long configId, Long galponId, String upperType,
+                                       Long centralActuatorId, String codeName) {
         if (configId == null) return false;
         return processedConfigRepository.findById(configId).map(rec -> {
             rec.setLastSeenAt(OffsetDateTime.now());
             processedConfigRepository.save(rec);
-            log.info("[ProgListener] Config duplicada configId={} — republicando ACK sin reaplicar", configId);
-            publishAck(configId, galponId, upperType, actuatorId, rec.getStatus(), rec.getMessage());
+            log.info("[ProgListener] Config duplicada configId={} — reenviando ACK sin reaplicar", configId);
+            publishAck(new ProgrammingAck(configId, galponId, upperType,
+                    centralActuatorId, codeName, rec.getActuatorId(), rec.getStatus(), rec.getMessage()));
             return true;
         }).orElse(false);
     }
 
+    private static boolean isPayloadIncomplete(String upperType, Double tempOn, Double tempOff) {
+        return upperType == null || tempOn == null || tempOff == null;
+    }
+
     private void saveProcessedConfig(Long configId, Long galponId, String upperType,
-                                      Long actuatorId, String status, String message) {
+                                      Long localActuatorId, String status, String message) {
         if (configId == null) return;
         OffsetDateTime now = OffsetDateTime.now();
         processedConfigRepository.save(ProcessedProgrammingConfig.builder()
                 .configId(configId)
                 .galponId(galponId)
                 .actuatorType(upperType)
-                .actuatorId(actuatorId)
+                .actuatorId(localActuatorId) // guardamos el ID local resuelto
                 .status(status)
                 .message(message)
                 .firstProcessedAt(now)
@@ -170,51 +198,51 @@ public class MqttProgrammingListenerService {
                 .build());
     }
 
-    private void applyProgramming(String upperType, Long actuatorId,
+    private void applyProgramming(String upperType, Long localActuatorId,
                                    Double tempOn, Double tempOff, Integer wds) {
         switch (upperType) {
             case "EXTRACTOR" ->
-                    extractorService.configureProgramming(actuatorId,
+                    extractorService.configureProgramming(localActuatorId,
                             new ConfigureExtractorProgrammingRequest(tempOn, tempOff));
             case "CRIADORA" ->
-                    criadoraService.configureProgramming(actuatorId,
+                    criadoraService.configureProgramming(localActuatorId,
                             new ConfigureCriadoraProgrammingRequest(tempOn, tempOff));
             case "BOMBA" -> {
-                int resolvedWds = resolveWorkDurationSeconds(actuatorId, wds);
-                bombaService.configureProgramming(actuatorId,
+                int resolvedWds = resolveWorkDurationSeconds(localActuatorId, wds);
+                bombaService.configureProgramming(localActuatorId,
                         new ConfigureBombaProgrammingRequest(tempOn, tempOff, resolvedWds));
             }
             default -> throw new IllegalArgumentException("actuatorType desconocido: " + upperType);
         }
     }
 
-    private int resolveWorkDurationSeconds(Long bombaId, Integer wdsFromPayload) {
-        if (wdsFromPayload != null && wdsFromPayload > 0) {
-            return wdsFromPayload;
-        }
-        return bombaProgrammingRepository.findByBombaId(bombaId)
+    private int resolveWorkDurationSeconds(Long localBombaId, Integer wdsFromPayload) {
+        if (wdsFromPayload != null && wdsFromPayload > 0) return wdsFromPayload;
+        return bombaProgrammingRepository.findByBombaId(localBombaId)
                 .map(p -> p.getWorkDurationSeconds() != null ? p.getWorkDurationSeconds() : DEFAULT_WORK_DURATION_SECONDS)
                 .orElse(DEFAULT_WORK_DURATION_SECONDS);
     }
 
-    private void publishAck(Long configId, Long galponId, String actuatorType, Long actuatorId,
-                             String status, String message) {
-        String topic = "avicola/galpon/" + galponId + "/config/programming/ack";
+    private void publishAck(ProgrammingAck a) {
+        String topic = "avicola/galpon/" + a.galponId() + "/config/programming/ack";
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put(FIELD_CONFIG_ID, configId);
-        payload.put(FIELD_GALPON_ID, galponId);
+        payload.put(FIELD_CONFIG_ID, a.configId());
+        payload.put(FIELD_GALPON_ID, a.galponId());
         payload.put("gatewayId", configuredGatewayId);
-        payload.put("actuatorType", actuatorType);
-        payload.put(FIELD_ACTUATOR_ID, actuatorId);
-        payload.put("status", status);
-        payload.put("message", message);
+        payload.put("actuatorType", a.actuatorType());
+        payload.put(FIELD_ACTUATOR_ID, a.centralActuatorId());      // backward compat
+        payload.put(FIELD_CENTRAL_ACTUATOR_ID, a.centralActuatorId());
+        payload.put(FIELD_LOCAL_ACTUATOR_ID, a.localActuatorId());
+        payload.put("codeName", a.codeName());
+        payload.put("status", a.status());
+        payload.put("message", a.message());
         payload.put("appliedAt", OffsetDateTime.now().toString());
 
         String json;
         try {
             json = objectMapper.writeValueAsString(payload);
         } catch (Exception e) {
-            log.error("[ProgListener] No se pudo serializar ACK para config {}: {}", configId, e.getMessage());
+            log.error("[ProgListener] No se pudo serializar ACK para config={}: {}", a.configId(), e.getMessage());
             return;
         }
         try {
@@ -223,18 +251,17 @@ public class MqttProgrammingListenerService {
             msg.setQos(QOS);
             msg.setRetained(RETAINED);
             client.publish(topic, msg);
-            log.info("[ProgListener] ACK {} publicado — configId={}", status, configId);
+            log.info("[ProgListener] ACK {} publicado — configId={} localId={} codeName={}",
+                    a.status(), a.configId(), a.localActuatorId(), a.codeName());
         } catch (Exception e) {
-            log.warn("[ProgListener] Falló publicación de ACK para config {}, encolando: {}", configId, e.getMessage());
+            log.warn("[ProgListener] Falló publicación de ACK para config={}, encolando: {}", a.configId(), e.getMessage());
             outboxService.enqueue(topic, json, "PROGRAMMING_ACK");
         }
     }
 
     private void ensureConnected() throws Exception {
         if (client == null) throw new IllegalStateException("Cliente MQTT no inicializado");
-        if (!client.isConnected()) {
-            client.connect(buildConnectOptions());
-        }
+        if (!client.isConnected()) client.connect(buildConnectOptions());
     }
 
     private MqttConnectOptions buildConnectOptions() {

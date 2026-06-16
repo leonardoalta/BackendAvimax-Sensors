@@ -28,6 +28,12 @@ app:
   galpon-id: ${GALPON_ID:1}
   gateway-id: ${GATEWAY_ID:raspi5-galpon-01}
 
+  seed:
+    demo-actuators: ${SEED_DEMO_ACTUATORS:false}
+
+  bootstrap:
+    enabled: ${BOOTSTRAP_ENABLED:true}
+
   mqtt:
     enabled: true
     # Usa MQTT_BROKER_URL si está seteada, sino detecta automáticamente

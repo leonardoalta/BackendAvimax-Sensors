@@ -12,4 +12,6 @@ public interface LocalMqttOutboxMessageRepository extends JpaRepository<LocalMqt
 
     @Query("SELECT m FROM LocalMqttOutboxMessage m WHERE m.status IN :statuses ORDER BY m.createdAt ASC")
     List<LocalMqttOutboxMessage> findPendingForRetry(@Param("statuses") List<String> statuses, Pageable pageable);
+
+    long countByStatusIn(List<String> statuses);
 }

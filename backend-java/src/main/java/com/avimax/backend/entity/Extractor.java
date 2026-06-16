@@ -19,8 +19,20 @@ public class Extractor {
     @Column(nullable = false, length = 100)
     private String name;
 
+    @Column(name = "code_name", unique = true, length = 20)
+    private String codeName;
+
     @Column(nullable = false)
     private boolean enabled = true;
+
+    @Column(name = "central_actuator_id")
+    private Long centralActuatorId;
+
+    @Column(name = "last_synced_at")
+    private OffsetDateTime lastSyncedAt;
+
+    @Column(name = "sync_source", length = 50)
+    private String syncSource;
 
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt = OffsetDateTime.now();
@@ -42,8 +54,48 @@ public class Extractor {
         return name;
     }
 
+    public String getCodeName() {
+        return codeName;
+    }
+
+    public void setCodeName(String codeName) {
+        this.codeName = codeName;
+    }
+
     public boolean isEnabled() {
         return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public Long getCentralActuatorId() {
+        return centralActuatorId;
+    }
+
+    public void setCentralActuatorId(Long centralActuatorId) {
+        this.centralActuatorId = centralActuatorId;
+    }
+
+    public OffsetDateTime getLastSyncedAt() {
+        return lastSyncedAt;
+    }
+
+    public void setLastSyncedAt(OffsetDateTime lastSyncedAt) {
+        this.lastSyncedAt = lastSyncedAt;
+    }
+
+    public String getSyncSource() {
+        return syncSource;
+    }
+
+    public void setSyncSource(String syncSource) {
+        this.syncSource = syncSource;
     }
 
     public OffsetDateTime getCreatedAt() {

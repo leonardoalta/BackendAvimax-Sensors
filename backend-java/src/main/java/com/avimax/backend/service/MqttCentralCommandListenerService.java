@@ -30,9 +30,20 @@ public class MqttCentralCommandListenerService {
     private static final Logger log = LoggerFactory.getLogger(MqttCentralCommandListenerService.class);
     private static final int QOS = 1;
     private static final boolean RETAINED = false;
-    private static final String FIELD_COMMAND_ID  = "commandId";
-    private static final String FIELD_GALPON_ID   = "galponId";
-    private static final String FIELD_ACTUATOR_ID = "actuatorId";
+    private static final String STATUS_ERROR             = "ERROR";
+    private static final String STATUS_EXECUTED          = "EXECUTED";
+    private static final String FIELD_COMMAND_ID         = "commandId";
+    private static final String FIELD_GALPON_ID          = "galponId";
+    private static final String FIELD_ACTUATOR_ID        = "actuatorId";        // backward compat
+    private static final String FIELD_CENTRAL_ACTUATOR_ID = "centralActuatorId";
+    private static final String FIELD_LOCAL_ACTUATOR_ID  = "localActuatorId";
+
+    /** Agrupa los campos de una respuesta MQTT para reducir la cantidad de parámetros. */
+    private record CommandResponse(
+            Long commandId, Long galponId, String actuatorType,
+            Long centralActuatorId, String codeName, Long localActuatorId,
+            String action, String status, String message
+    ) {}
 
     private final MqttProperties mqttProperties;
     private final ActuatorControlService actuatorControlService;
@@ -62,13 +73,12 @@ public class MqttCentralCommandListenerService {
         try {
             client = new MqttClient(mqttProperties.brokerUrl(),
                     mqttProperties.clientId() + "-cmd-listener", new MemoryPersistence());
-            MqttConnectOptions options = buildConnectOptions();
-            client.connect(options);
+            client.connect(buildConnectOptions());
             String topic = "avicola/galpon/" + configuredGalponId + "/actuadores/cmd";
             client.subscribe(topic, QOS, this::handleMessage);
             log.info("[CmdListener] Suscrito a {} en {}", topic, mqttProperties.brokerUrl());
         } catch (Exception e) {
-            log.warn("[CmdListener] No se pudo conectar al iniciar (se reintentará cuando haya conexión): {}", e.getMessage());
+            log.warn("[CmdListener] No se pudo conectar al iniciar: {}", e.getMessage());
         }
     }
 
@@ -92,118 +102,146 @@ public class MqttCentralCommandListenerService {
     }
 
     private void processCommand(JsonNode root) throws Exception {
-        Long commandId  = root.hasNonNull(FIELD_COMMAND_ID)  ? root.get(FIELD_COMMAND_ID).asLong()  : null;
-        Long galponId   = root.hasNonNull(FIELD_GALPON_ID)   ? root.get(FIELD_GALPON_ID).asLong()   : null;
-        String actuatorType = root.path("actuatorType").asText(null);
-        Long actuatorId     = root.hasNonNull(FIELD_ACTUATOR_ID) ? root.get(FIELD_ACTUATOR_ID).asLong() : null;
-        String action       = root.path("action").asText(null);
+        Long commandId         = root.hasNonNull(FIELD_COMMAND_ID) ? root.get(FIELD_COMMAND_ID).asLong() : null;
+        Long galponId          = root.hasNonNull(FIELD_GALPON_ID)  ? root.get(FIELD_GALPON_ID).asLong()  : null;
+        Long centralActuatorId = root.hasNonNull(FIELD_ACTUATOR_ID) ? root.get(FIELD_ACTUATOR_ID).asLong() : null;
+        String rawCodeName     = root.path("codeName").asText(null);
+        String codeName        = (rawCodeName != null && !rawCodeName.isBlank()) ? rawCodeName : null;
+        String action          = root.path("action").asText(null);
         Integer workDurationSeconds = root.hasNonNull("workDurationSeconds")
                 ? root.get("workDurationSeconds").asInt() : null;
 
         if (galponId == null || galponId != configuredGalponId) {
-            log.warn("[CmdListener] galponId {} no coincide con este backend ({}). Ignorando comando {}",
+            log.warn("[CmdListener] galponId={} no coincide con este backend ({}). Ignorando cmd={}",
                     galponId, configuredGalponId, commandId);
             return;
         }
 
-        if (actuatorType == null || actuatorType.isBlank()) {
-            log.warn("[CmdListener] actuatorType ausente en comando {}", commandId);
-            publishResponse(commandId, galponId, actuatorType, actuatorId, action,
-                    "ERROR", "actuatorType ausente");
-            return;
-        }
-        String upperType = actuatorType.toUpperCase();
-        if (!upperType.equals(ActuatorControlService.TYPE_EXTRACTOR)
-                && !upperType.equals(ActuatorControlService.TYPE_CRIADORA)
-                && !upperType.equals(ActuatorControlService.TYPE_BOMBA)) {
-            log.warn("[CmdListener] Tipo desconocido: {} en comando {}", actuatorType, commandId);
-            publishResponse(commandId, galponId, actuatorType, actuatorId, action,
-                    "ERROR", "Tipo desconocido: " + actuatorType);
-            return;
-        }
+        String upperType = resolveAndValidateType(root.path("actuatorType").asText(null),
+                commandId, galponId, centralActuatorId, codeName, action);
+        if (upperType == null) return; // ya se publicó error
 
         if (action == null || (!action.equalsIgnoreCase("ON") && !action.equalsIgnoreCase("OFF"))) {
             log.warn("[CmdListener] Acción inválida '{}' en comando {}", action, commandId);
             return;
         }
 
-        if (isDuplicateCommand(commandId, galponId, actuatorType, actuatorId, action)) return;
+        if (isDuplicateCommand(commandId, galponId, upperType, centralActuatorId, codeName, action)) return;
 
-        String responseMessage = "Comando " + action + " aplicado en " + upperType + " " + actuatorId;
-        actuatorControlService.applyExternalCommand(upperType, actuatorId, action,
+        // ── Resolución local por codeName (fallback: centralActuatorId) ──────────────
+        Long localActuatorId;
+        try {
+            localActuatorId = actuatorControlService.resolveLocalActuatorId(upperType, centralActuatorId, codeName);
+        } catch (IllegalArgumentException e) {
+            log.warn("[CmdListener] No se pudo resolver actuador para cmd={}: {}", commandId, e.getMessage());
+            publishResponse(new CommandResponse(commandId, galponId, upperType,
+                    centralActuatorId, codeName, null, action, STATUS_ERROR, e.getMessage()));
+            return;
+        }
+
+        log.info("[CmdListener] Resuelto: centralId={} codeName={} → localId={} | cmd={} action={}",
+                centralActuatorId, codeName, localActuatorId, commandId, action);
+
+        String msg = "Comando " + action + " aplicado en " + upperType + " "
+                + (codeName != null ? codeName : localActuatorId);
+        actuatorControlService.applyExternalCommand(upperType, localActuatorId, action,
                 "CENTRAL_COMMAND", workDurationSeconds);
-        saveProcessedCommand(commandId, galponId, upperType, actuatorId, action, responseMessage);
-        publishResponse(commandId, galponId, actuatorType, actuatorId, action, "EXECUTED", responseMessage);
+        saveProcessedCommand(commandId, galponId, upperType, localActuatorId, action, msg);
+        publishResponse(new CommandResponse(commandId, galponId, upperType,
+                centralActuatorId, codeName, localActuatorId, action, STATUS_EXECUTED, msg));
     }
 
-    private boolean isDuplicateCommand(Long commandId, Long galponId,
-                                        String actuatorType, Long actuatorId, String action) {
+    /** Valida tipo de actuador. Publica error y retorna null si inválido. */
+    private String resolveAndValidateType(String actuatorType, Long commandId, Long galponId,
+                                           Long centralActuatorId, String codeName, String action) {
+        if (actuatorType == null || actuatorType.isBlank()) {
+            log.warn("[CmdListener] actuatorType ausente en comando {}", commandId);
+            publishResponse(new CommandResponse(commandId, galponId, null,
+                    centralActuatorId, codeName, null, action, STATUS_ERROR, "actuatorType ausente"));
+            return null;
+        }
+        String upper = actuatorType.toUpperCase();
+        if (!upper.equals(ActuatorControlService.TYPE_EXTRACTOR)
+                && !upper.equals(ActuatorControlService.TYPE_CRIADORA)
+                && !upper.equals(ActuatorControlService.TYPE_BOMBA)) {
+            log.warn("[CmdListener] Tipo desconocido: {} en comando {}", actuatorType, commandId);
+            publishResponse(new CommandResponse(commandId, galponId, upper,
+                    centralActuatorId, codeName, null, action, STATUS_ERROR, "Tipo desconocido: " + actuatorType));
+            return null;
+        }
+        return upper;
+    }
+
+    private boolean isDuplicateCommand(Long commandId, Long galponId, String actuatorType,
+                                        Long centralActuatorId, String codeName, String action) {
         if (commandId == null) return false;
         return processedCommandRepository.findById(commandId).map(rec -> {
             rec.setLastSeenAt(OffsetDateTime.now());
             processedCommandRepository.save(rec);
-            log.info("[CmdListener] Comando duplicado commandId={} — republicando respuesta sin reaplicar", commandId);
-            publishResponse(commandId, galponId, actuatorType, actuatorId, action, rec.getStatus(), rec.getMessage());
+            log.info("[CmdListener] Duplicado commandId={} — reenviando respuesta anterior", commandId);
+            publishResponse(new CommandResponse(commandId, galponId, actuatorType,
+                    centralActuatorId, codeName, rec.getActuatorId(), action, rec.getStatus(), rec.getMessage()));
             return true;
         }).orElse(false);
     }
 
     private void saveProcessedCommand(Long commandId, Long galponId, String upperType,
-                                       Long actuatorId, String action, String message) {
+                                       Long localActuatorId, String action, String message) {
         if (commandId == null) return;
         OffsetDateTime now = OffsetDateTime.now();
         processedCommandRepository.save(ProcessedMqttCommand.builder()
                 .commandId(commandId)
                 .galponId(galponId)
                 .actuatorType(upperType)
-                .actuatorId(actuatorId)
+                .actuatorId(localActuatorId)
                 .action(action.toUpperCase())
-                .status("EXECUTED")
+                .status(STATUS_EXECUTED)
                 .message(message)
                 .firstProcessedAt(now)
                 .lastSeenAt(now)
                 .build());
     }
 
-    private void publishResponse(Long commandId, Long galponId, String actuatorType,
-                                  Long actuatorId, String action, String status, String message) {
-        String topic = "avicola/galpon/" + galponId + "/actuadores/respuestas";
+    private void publishResponse(CommandResponse r) {
+        String topic = "avicola/galpon/" + r.galponId() + "/actuadores/respuestas";
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put(FIELD_COMMAND_ID, commandId);
-        payload.put(FIELD_GALPON_ID, galponId);
+        payload.put(FIELD_COMMAND_ID, r.commandId());
+        payload.put(FIELD_GALPON_ID, r.galponId());
         payload.put("gatewayId", configuredGatewayId);
-        payload.put("actuatorType", actuatorType);
-        payload.put(FIELD_ACTUATOR_ID, actuatorId);
-        payload.put("action", action);
-        payload.put("status", status);
-        payload.put("message", message);
+        payload.put("actuatorType", r.actuatorType());
+        payload.put(FIELD_ACTUATOR_ID, r.centralActuatorId());      // backward compat
+        payload.put(FIELD_CENTRAL_ACTUATOR_ID, r.centralActuatorId());
+        payload.put(FIELD_LOCAL_ACTUATOR_ID, r.localActuatorId());
+        payload.put("codeName", r.codeName());
+        payload.put("action", r.action());
+        payload.put("status", r.status());
+        payload.put("message", r.message());
         payload.put("executedAt", OffsetDateTime.now().toString());
 
         String json;
         try {
             json = objectMapper.writeValueAsString(payload);
         } catch (Exception e) {
-            log.error("[CmdListener] No se pudo serializar respuesta para comando {}: {}", commandId, e.getMessage());
+            log.error("[CmdListener] No se pudo serializar respuesta para cmd={}: {}", r.commandId(), e.getMessage());
             return;
         }
         try {
             ensureConnected();
-            MqttMessage msg = new MqttMessage(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            MqttMessage msg = new MqttMessage(json.getBytes(StandardCharsets.UTF_8));
             msg.setQos(QOS);
             msg.setRetained(RETAINED);
             client.publish(topic, msg);
-            log.info("[CmdListener] Respuesta publicada — commandId={}, status={}", commandId, status);
+            log.info("[CmdListener] Respuesta publicada — cmd={} status={} localId={} codeName={}",
+                    r.commandId(), r.status(), r.localActuatorId(), r.codeName());
         } catch (Exception e) {
-            log.warn("[CmdListener] Falló publicación de respuesta para comando {}, encolando: {}", commandId, e.getMessage());
+            log.warn("[CmdListener] Falló publicación para cmd={}, encolando: {}", r.commandId(), e.getMessage());
             outboxService.enqueue(topic, json, "ACTUATOR_RESPONSE");
         }
     }
 
     private void ensureConnected() throws Exception {
         if (client == null) throw new IllegalStateException("Cliente MQTT no inicializado");
-        if (!client.isConnected()) {
-            client.connect(buildConnectOptions());
-        }
+        if (!client.isConnected()) client.connect(buildConnectOptions());
     }
 
     private MqttConnectOptions buildConnectOptions() {

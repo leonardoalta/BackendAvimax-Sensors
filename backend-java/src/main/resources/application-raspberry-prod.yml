@@ -1,0 +1,26 @@
+# Perfil para Raspberry Pi en producción
+# Variables requeridas: DB_USERNAME, DB_PASSWORD, GATEWAY_ID, GALPON_ID
+# MQTT_BROKER_URL debe apuntar a tcp://127.0.0.1:1883 (local Mosquitto)
+
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: false
+
+app:
+  seed:
+    demo-actuators: false
+
+  mqtt:
+    enabled: true
+    broker-url: ${MQTT_BROKER_URL:tcp://127.0.0.1:1883}
+    username: ""
+    password: ""
+
+logging:
+  level:
+    com.avimax: INFO
+    org.hibernate.SQL: WARN

@@ -45,6 +45,7 @@ public class ActuatorControlService {
     static final String TYPE_CRIADORA    = "CRIADORA";
     static final String TYPE_BOMBA       = "BOMBA";
     private static final String TRIGGERED_MANUAL_LOCAL = "MANUAL_LOCAL";
+    private static final String CENTRAL_ID_SUFFIX = ", centralId=";
 
     private final ExtractorRepository extractorRepository;
     private final ExtractorProgrammingRepository extractorProgrammingRepository;
@@ -141,6 +142,7 @@ public class ActuatorControlService {
                                      String triggeredBy, Integer workDurationSeconds) {
         boolean desiredState = "ON".equalsIgnoreCase(action);
         String name = resolveActuatorName(actuatorType, actuatorId);
+        String codeName = resolveCodeName(actuatorType, actuatorId);
         String displayName = name != null ? name : actuatorType + "-" + actuatorId;
         int slotNumber = resolveSlotNumber(actuatorType, actuatorId);
 
@@ -151,7 +153,7 @@ public class ActuatorControlService {
         actuatorControlStateRepository.save(state);
 
         mqttActuatorPublisherService.publishStateChange(actuatorType, slotNumber, actuatorId, displayName, desiredState);
-        syncPublisher.publishActuatorStateChanged(state, triggeredBy, workDurationSeconds);
+        syncPublisher.publishActuatorStateChanged(state, codeName, triggeredBy, workDurationSeconds);
         scheduleAutoOff(actuatorType, actuatorId, action, workDurationSeconds);
     }
 
@@ -222,6 +224,64 @@ public class ActuatorControlService {
             }
         }, delay, TimeUnit.SECONDS);
         log.info("[ActuatorControl] Auto-OFF de BOMBA {} programado en {}s", actuatorId, delay);
+    }
+
+    /**
+     * Resuelve el ID local del actuador dado un centralActuatorId (fallback) y un codeName (preferido).
+     * Lanza IllegalArgumentException si no se encuentra por ninguna vía.
+     */
+    public Long resolveLocalActuatorId(String actuatorType, Long centralActuatorId, String codeName) {
+        return switch (actuatorType.toUpperCase()) {
+            case TYPE_EXTRACTOR -> resolveExtractor(centralActuatorId, codeName)
+                    .map(Extractor::getId)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "EXTRACTOR no encontrado: codeName=" + codeName + CENTRAL_ID_SUFFIX + centralActuatorId));
+            case TYPE_CRIADORA -> resolveCriadora(centralActuatorId, codeName)
+                    .map(Criadora::getId)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "CRIADORA no encontrada: codeName=" + codeName + CENTRAL_ID_SUFFIX + centralActuatorId));
+            case TYPE_BOMBA -> resolveBomba(centralActuatorId, codeName)
+                    .map(Bomba::getId)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "BOMBA no encontrada: codeName=" + codeName + CENTRAL_ID_SUFFIX + centralActuatorId));
+            default -> throw new IllegalArgumentException("Tipo de actuador desconocido: " + actuatorType);
+        };
+    }
+
+    private java.util.Optional<Extractor> resolveExtractor(Long actuatorId, String codeName) {
+        if (codeName != null && !codeName.isBlank()) {
+            java.util.Optional<Extractor> byCode = extractorRepository.findByCodeName(codeName);
+            if (byCode.isPresent()) return byCode;
+            log.warn("[ActuatorResolve] EXTRACTOR codeName={} no encontrado localmente, fallback a id={}", codeName, actuatorId);
+        }
+        return actuatorId != null ? extractorRepository.findById(actuatorId) : java.util.Optional.empty();
+    }
+
+    private java.util.Optional<Criadora> resolveCriadora(Long actuatorId, String codeName) {
+        if (codeName != null && !codeName.isBlank()) {
+            java.util.Optional<Criadora> byCode = criadoraRepository.findByCodeName(codeName);
+            if (byCode.isPresent()) return byCode;
+            log.warn("[ActuatorResolve] CRIADORA codeName={} no encontrada localmente, fallback a id={}", codeName, actuatorId);
+        }
+        return actuatorId != null ? criadoraRepository.findById(actuatorId) : java.util.Optional.empty();
+    }
+
+    private java.util.Optional<Bomba> resolveBomba(Long actuatorId, String codeName) {
+        if (codeName != null && !codeName.isBlank()) {
+            java.util.Optional<Bomba> byCode = bombaRepository.findByCodeName(codeName);
+            if (byCode.isPresent()) return byCode;
+            log.warn("[ActuatorResolve] BOMBA codeName={} no encontrada localmente, fallback a id={}", codeName, actuatorId);
+        }
+        return actuatorId != null ? bombaRepository.findById(actuatorId) : java.util.Optional.empty();
+    }
+
+    private String resolveCodeName(String type, Long actuatorId) {
+        return switch (type.toUpperCase()) {
+            case TYPE_EXTRACTOR -> extractorRepository.findById(actuatorId).map(Extractor::getCodeName).orElse(null);
+            case TYPE_CRIADORA  -> criadoraRepository.findById(actuatorId).map(Criadora::getCodeName).orElse(null);
+            case TYPE_BOMBA     -> bombaRepository.findById(actuatorId).map(Bomba::getCodeName).orElse(null);
+            default -> null;
+        };
     }
 
     private String resolveActuatorName(String type, Long actuatorId) {
