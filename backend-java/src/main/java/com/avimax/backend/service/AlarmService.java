@@ -21,6 +21,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +36,9 @@ public class AlarmService {
     private final AlarmRepository alarmRepository;
     private final AlarmEventRepository alarmEventRepository;
     private final AlarmMqttPublisherService alarmMqttPublisherService;
+
+    @Autowired(required = false)
+    private LocalSyncMqttPublisherService syncPublisher;
 
     public AlarmService(AlarmRuleRepository alarmRuleRepository,
                         AlarmRepository alarmRepository,
@@ -59,7 +63,9 @@ public class AlarmService {
                 request.mensaje(),
                 request.activa()
         );
-        return AlarmRuleResponse.fromEntity(alarmRuleRepository.save(rule));
+        AlarmRule saved = alarmRuleRepository.save(rule);
+        if (syncPublisher != null) syncPublisher.publishAlarmRuleChanged(saved, "ALARM_RULE_CREATED");
+        return AlarmRuleResponse.fromEntity(saved);
     }
 
     @Transactional(readOnly = true)
@@ -82,14 +88,19 @@ public class AlarmService {
                 request.severidad(),
                 request.mensaje()
         );
-        return AlarmRuleResponse.fromEntity(alarmRuleRepository.save(rule));
+        AlarmRule saved = alarmRuleRepository.save(rule);
+        if (syncPublisher != null) syncPublisher.publishAlarmRuleChanged(saved, "ALARM_RULE_UPDATED");
+        return AlarmRuleResponse.fromEntity(saved);
     }
 
     @Transactional
     public AlarmRuleResponse setRuleActive(Long ruleId, ToggleAlarmRuleRequest request) {
         AlarmRule rule = findRule(ruleId);
         rule.setActive(request.activa());
-        return AlarmRuleResponse.fromEntity(alarmRuleRepository.save(rule));
+        AlarmRule saved = alarmRuleRepository.save(rule);
+        String changeType = saved.isActive() ? "ALARM_RULE_ENABLED" : "ALARM_RULE_DISABLED";
+        if (syncPublisher != null) syncPublisher.publishAlarmRuleChanged(saved, changeType);
+        return AlarmRuleResponse.fromEntity(saved);
     }
 
     @Transactional(readOnly = true)
@@ -130,6 +141,7 @@ public class AlarmService {
 
         registerEvent(alarm, AlarmEventType.ALARMA_RECONOCIDA, previous, alarm.getStatus(), "Alarma reconocida manualmente", now);
         alarmMqttPublisherService.publishEvent(AlarmEventType.ALARMA_RECONOCIDA, alarm, null, now);
+        if (syncPublisher != null) syncPublisher.publishAlarmAcknowledged(alarm);
         return AlarmResponse.fromEntity(alarm);
     }
 
@@ -150,6 +162,7 @@ public class AlarmService {
 
         registerEvent(alarm, AlarmEventType.ALARMA_CERRADA, previous, alarm.getStatus(), "Alarma cerrada manualmente", now);
         alarmMqttPublisherService.publishEvent(AlarmEventType.ALARMA_CERRADA, alarm, null, now);
+        if (syncPublisher != null) syncPublisher.publishAlarmClosed(alarm);
         return AlarmResponse.fromEntity(alarm);
     }
 
@@ -176,6 +189,7 @@ public class AlarmService {
         Alarm saved = alarmRepository.save(alarm);
         registerEvent(saved, AlarmEventType.ALARMA_ACTIVADA, null, AlarmStatus.ACTIVA, "Condición de alarma cumplida durante el tiempo mínimo configurado", eventAt);
         alarmMqttPublisherService.publishEvent(AlarmEventType.ALARMA_ACTIVADA, saved, null, eventAt);
+        if (syncPublisher != null) syncPublisher.publishAlarmTriggered(saved);
         return Optional.of(saved);
     }
 
@@ -193,6 +207,7 @@ public class AlarmService {
 
         registerEvent(alarm, AlarmEventType.ALARMA_RESUELTA, previous, AlarmStatus.RESUELTA, message, eventAt);
         alarmMqttPublisherService.publishEvent(AlarmEventType.ALARMA_RESUELTA, alarm, message, eventAt);
+        if (syncPublisher != null) syncPublisher.publishAlarmResolved(alarm);
         return Optional.of(alarm);
     }
 

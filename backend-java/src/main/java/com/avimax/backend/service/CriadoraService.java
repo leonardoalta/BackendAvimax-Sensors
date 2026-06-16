@@ -9,6 +9,7 @@ import com.avimax.backend.repository.CriadoraProgrammingRepository;
 import com.avimax.backend.repository.CriadoraProgrammingHistoryRepository;
 import com.avimax.backend.repository.CriadoraRepository;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,9 @@ public class CriadoraService {
     private final CriadoraProgrammingRepository criadoraProgrammingRepository;
     private final CriadoraProgrammingHistoryRepository criadoraProgrammingHistoryRepository;
 
+    @Autowired(required = false)
+    private LocalSyncMqttPublisherService syncPublisher;
+
     public CriadoraService(CriadoraRepository criadoraRepository, CriadoraProgrammingRepository criadoraProgrammingRepository, CriadoraProgrammingHistoryRepository criadoraProgrammingHistoryRepository) {
         this.criadoraRepository = criadoraRepository;
         this.criadoraProgrammingRepository = criadoraProgrammingRepository;
@@ -30,7 +34,25 @@ public class CriadoraService {
 
     @Transactional
     public Criadora create(CreateCriadoraRequest request) {
-        return criadoraRepository.save(new Criadora(request.name()));
+        Criadora criadora = new Criadora(request.name());
+        if (request.codeName() != null && !request.codeName().isBlank()) {
+            criadora.setCodeName(request.codeName().toUpperCase().strip());
+        }
+        Criadora saved = criadoraRepository.save(criadora);
+        if (syncPublisher != null) syncPublisher.publishActuatorUpsert(saved, "ACTUATOR_CREATED");
+        return saved;
+    }
+
+    @Transactional
+    public Criadora setEnabled(Long criadoraId, boolean enabled) {
+        Criadora criadora = criadoraRepository.findById(criadoraId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Criadora no encontrada"));
+        criadora.setEnabled(enabled);
+        Criadora saved = criadoraRepository.save(criadora);
+        if (syncPublisher != null) {
+            syncPublisher.publishActuatorUpsert(saved, enabled ? "ACTUATOR_ENABLED" : "ACTUATOR_DISABLED");
+        }
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -77,6 +99,10 @@ public class CriadoraService {
         }
 
         criadoraProgrammingHistoryRepository.save(new com.avimax.backend.entity.CriadoraProgrammingHistory(criadora, saved.getTemperatureOn(), saved.getTemperatureOff()));
+        if (syncPublisher != null) {
+            syncPublisher.publishProgrammingChanged("CRIADORA", criadora.getCodeName(),
+                    saved.getTemperatureOn(), saved.getTemperatureOff(), null);
+        }
         return saved;
     }
 }

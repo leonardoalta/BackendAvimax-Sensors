@@ -42,6 +42,12 @@ public class ConsumptionRecord {
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
+    @Column(name = "central_record_id")
+    private Long centralRecordId;
+
+    @Column(name = "sync_status", length = 20)
+    private String syncStatus = "PENDING";
+
     protected ConsumptionRecord() {
     }
 
@@ -119,4 +125,10 @@ public class ConsumptionRecord {
     public void setCreatedAt(OffsetDateTime createdAt) {
         this.createdAt = createdAt;
     }
+
+    public Long getCentralRecordId() { return centralRecordId; }
+    public void setCentralRecordId(Long centralRecordId) { this.centralRecordId = centralRecordId; }
+
+    public String getSyncStatus() { return syncStatus; }
+    public void setSyncStatus(String syncStatus) { this.syncStatus = syncStatus; }
 }

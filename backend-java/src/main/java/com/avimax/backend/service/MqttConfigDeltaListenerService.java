@@ -44,6 +44,20 @@ public class MqttConfigDeltaListenerService implements MqttCallbackExtended {
     private static final String FIELD_TEMP_OFF = "temperatureOff";
     private static final String FIELD_ENABLED  = "enabled";
     private static final String FIELD_CFG_VER  = "configVersion";
+    private static final String FIELD_MESSAGE      = "message";
+    private static final String FIELD_VARIABLE     = "variable";
+    private static final String FIELD_CONDITION    = "conditionType";
+    private static final String FIELD_SEVERITY     = "severity";
+    private static final String FIELD_THRESHOLD    = "threshold";
+    private static final String FIELD_UNIT         = "unit";
+    private static final String FIELD_MIN_DURATION = "minimumDurationSeconds";
+    private static final String FIELD_ACTIVE       = "active";
+
+    private static final String ALARM_RULE_CREATED  = "ALARM_RULE_CREATED";
+    private static final String ALARM_RULE_UPDATED  = "ALARM_RULE_UPDATED";
+    private static final String ALARM_RULE_ENABLED  = "ALARM_RULE_ENABLED";
+    private static final String ALARM_RULE_DISABLED  = "ALARM_RULE_DISABLED";
+    private static final String PRODUCTIVE_SVC_MISSING = "LocalProductiveRecordDeltaService no disponible";
 
     private final MqttProperties mqttProperties;
     private final ObjectMapper objectMapper;
@@ -55,12 +69,16 @@ public class MqttConfigDeltaListenerService implements MqttCallbackExtended {
     private final CriadoraProgrammingRepository criadoraProgrammingRepository;
     private final BombaRepository bombaRepository;
     private final BombaProgrammingRepository bombaProgrammingRepository;
+    private final AlarmRuleRepository alarmRuleRepository;
 
     @Autowired(required = false)
     private LocalMqttOutboxService outboxService;
 
     @Autowired(required = false)
     private PullRequestPublisherService pullRequestPublisher;
+
+    @Autowired(required = false)
+    private LocalProductiveRecordDeltaService productiveRecordDeltaService;
 
     @Value("${app.galpon-id:1}")
     private long configuredGalponId;
@@ -79,17 +97,19 @@ public class MqttConfigDeltaListenerService implements MqttCallbackExtended {
                                            CriadoraRepository criadoraRepository,
                                            CriadoraProgrammingRepository criadoraProgrammingRepository,
                                            BombaRepository bombaRepository,
-                                           BombaProgrammingRepository bombaProgrammingRepository) {
-        this.mqttProperties               = mqttProperties;
-        this.objectMapper                 = objectMapper;
-        this.processedDeltaRepository     = processedDeltaRepository;
-        this.configStateRepository        = configStateRepository;
-        this.extractorRepository          = extractorRepository;
+                                           BombaProgrammingRepository bombaProgrammingRepository,
+                                           AlarmRuleRepository alarmRuleRepository) {
+        this.mqttProperties                 = mqttProperties;
+        this.objectMapper                   = objectMapper;
+        this.processedDeltaRepository       = processedDeltaRepository;
+        this.configStateRepository          = configStateRepository;
+        this.extractorRepository            = extractorRepository;
         this.extractorProgrammingRepository = extractorProgrammingRepository;
-        this.criadoraRepository           = criadoraRepository;
+        this.criadoraRepository             = criadoraRepository;
         this.criadoraProgrammingRepository  = criadoraProgrammingRepository;
-        this.bombaRepository              = bombaRepository;
-        this.bombaProgrammingRepository   = bombaProgrammingRepository;
+        this.bombaRepository                = bombaRepository;
+        this.bombaProgrammingRepository     = bombaProgrammingRepository;
+        this.alarmRuleRepository            = alarmRuleRepository;
     }
 
     @PostConstruct
@@ -154,8 +174,9 @@ public class MqttConfigDeltaListenerService implements MqttCallbackExtended {
             JsonNode root       = objectMapper.readTree(raw);
             String deltaId      = root.path("deltaId").asText(null);
             String changeType   = root.path("changeType").asText(null);
-            String actuatorType = root.path("actuatorType").asText(null);
-            String codeName     = root.path("codeName").asText(null);
+            String actuatorType  = root.path("actuatorType").asText(null);
+            String entityType    = root.path("entityType").asText(null);
+            String codeName      = root.path("codeName").asText(null);
             Long   configVersion = root.hasNonNull(FIELD_CFG_VER) ? root.get(FIELD_CFG_VER).asLong() : null;
             JsonNode data        = root.path("data");
 
@@ -170,10 +191,11 @@ public class MqttConfigDeltaListenerService implements MqttCallbackExtended {
                 return;
             }
 
-            log.info("[DeltaListener] Aplicando delta deltaId={} tipo={} actuador={}/{}",
-                    deltaId, changeType, actuatorType, codeName);
+            String dispatchType = actuatorType != null ? actuatorType : entityType;
+            log.info("[DeltaListener] Aplicando delta deltaId={} tipo={} dispatch={} codeName={}",
+                    deltaId, changeType, dispatchType, codeName);
 
-            String errorMsg = applyDelta(changeType, actuatorType, codeName, data);
+            String errorMsg = applyDelta(changeType, dispatchType, codeName, data);
 
             if (errorMsg != null) {
                 log.error("[DeltaListener] Error en deltaId={}: {}", deltaId, errorMsg);
@@ -200,14 +222,48 @@ public class MqttConfigDeltaListenerService implements MqttCallbackExtended {
         }
     }
 
-    private String applyDelta(String changeType, String actuatorType, String codeName, JsonNode data) {
-        if (actuatorType == null || codeName == null) return "actuatorType o codeName nulos";
-        return switch (actuatorType.toUpperCase()) {
-            case "EXTRACTOR" -> applyExtractorDelta(changeType, codeName, data);
-            case "CRIADORA"  -> applyCriadoraDelta(changeType, codeName, data);
-            case "BOMBA"     -> applyBombaDelta(changeType, codeName, data);
-            default -> "Tipo de actuador desconocido: " + actuatorType;
+    private String applyDelta(String changeType, String dispatchType, String codeName, JsonNode data) {
+        if (dispatchType == null) return "actuatorType y entityType nulos";
+        return switch (dispatchType.toUpperCase()) {
+            case "EXTRACTOR"   -> {
+                if (codeName == null) yield "codeName nulo para EXTRACTOR";
+                yield applyExtractorDelta(changeType, codeName, data);
+            }
+            case "CRIADORA"    -> {
+                if (codeName == null) yield "codeName nulo para CRIADORA";
+                yield applyCriadoraDelta(changeType, codeName, data);
+            }
+            case "BOMBA"       -> {
+                if (codeName == null) yield "codeName nulo para BOMBA";
+                yield applyBombaDelta(changeType, codeName, data);
+            }
+            case "ALARM_RULE"  -> applyAlarmRuleDelta(changeType, codeName, data);
+            case "ALARM"       -> delegateAlarmState(changeType, data);
+            case "MORTALITY_RECORD"    -> delegateMortalityDelta(changeType, data);
+            case "WEIGHT_RECORD"       -> delegateWeightDelta(changeType, data);
+            case "CONSUMPTION_RECORD"  -> delegateConsumptionDelta(changeType, data);
+            default -> "Tipo desconocido: " + dispatchType;
         };
+    }
+
+    private String delegateAlarmState(String changeType, JsonNode data) {
+        if (productiveRecordDeltaService == null) return PRODUCTIVE_SVC_MISSING;
+        return productiveRecordDeltaService.applyAlarmStateDelta(changeType, data);
+    }
+
+    private String delegateMortalityDelta(String changeType, JsonNode data) {
+        if (productiveRecordDeltaService == null) return PRODUCTIVE_SVC_MISSING;
+        return productiveRecordDeltaService.applyMortalityRecordDelta(changeType, data);
+    }
+
+    private String delegateWeightDelta(String changeType, JsonNode data) {
+        if (productiveRecordDeltaService == null) return PRODUCTIVE_SVC_MISSING;
+        return productiveRecordDeltaService.applyWeightRecordDelta(changeType, data);
+    }
+
+    private String delegateConsumptionDelta(String changeType, JsonNode data) {
+        if (productiveRecordDeltaService == null) return PRODUCTIVE_SVC_MISSING;
+        return productiveRecordDeltaService.applyConsumptionRecordDelta(changeType, data);
     }
 
     private String applyExtractorDelta(String changeType, String codeName, JsonNode data) {
@@ -272,6 +328,55 @@ public class MqttConfigDeltaListenerService implements MqttCallbackExtended {
         return null;
     }
 
+    private String applyAlarmRuleDelta(String changeType, String codeName, JsonNode data) {
+        if (codeName == null || codeName.isBlank()) return "codeName (nombre) de regla nulo";
+        AlarmRule existing = alarmRuleRepository.findByName(codeName).orElse(null);
+        if (ALARM_RULE_CREATED.equals(changeType) || ALARM_RULE_UPDATED.equals(changeType)) {
+            return upsertAlarmRule(existing, codeName, data);
+        } else if (ALARM_RULE_ENABLED.equals(changeType) || ALARM_RULE_DISABLED.equals(changeType)) {
+            if (existing == null) return "Regla de alarma no encontrada: " + codeName;
+            existing.setActive(ALARM_RULE_ENABLED.equals(changeType));
+            alarmRuleRepository.save(existing);
+        }
+        return null;
+    }
+
+    private String upsertAlarmRule(AlarmRule existing, String codeName, JsonNode data) {
+        try {
+            String varStr = resolveStr(data, FIELD_VARIABLE,  existing != null ? existing.getVariable().name()          : null);
+            String conStr = resolveStr(data, FIELD_CONDITION, existing != null ? existing.getConditionType().name()     : null);
+            String sevStr = resolveStr(data, FIELD_SEVERITY,  existing != null ? existing.getSeverity().name()          : null);
+            AlarmVariable  variable   = parseEnum(AlarmVariable.class,  varStr, FIELD_VARIABLE);
+            AlarmCondition condition  = parseEnum(AlarmCondition.class, conStr, FIELD_CONDITION);
+            AlarmSeverity  severity   = parseEnum(AlarmSeverity.class,  sevStr, FIELD_SEVERITY);
+            double  threshold   = resolveDouble(data, FIELD_THRESHOLD,    existing != null ? existing.getThreshold()             : 0.0);
+            String  unit        = resolveStr(   data, FIELD_UNIT,         existing != null ? existing.getUnit()                  : "");
+            int     minDuration = resolveInt(   data, FIELD_MIN_DURATION, existing != null ? existing.getMinimumDurationSeconds() : 0);
+            String  message     = resolveStr(   data, FIELD_MESSAGE,      existing != null ? existing.getMessage()               : "");
+            boolean active      = resolveBool(  data, FIELD_ACTIVE,       existing == null || existing.isActive());
+            if (existing != null) {
+                existing.update(codeName, variable, condition, threshold, unit, minDuration, severity, message);
+                alarmRuleRepository.save(existing);
+            } else {
+                alarmRuleRepository.save(new AlarmRule(codeName, variable, condition, threshold, unit, minDuration, severity, message, active));
+            }
+            return null;
+        } catch (IllegalArgumentException e) {
+            return "Valor inválido en delta de regla de alarma: " + e.getMessage();
+        }
+    }
+
+    private static <E extends Enum<E>> E parseEnum(Class<E> type, String value, String fieldName) {
+        if (value == null) throw new IllegalArgumentException(fieldName + " es requerido");
+        try { return Enum.valueOf(type, value.toUpperCase()); }
+        catch (IllegalArgumentException e) { throw new IllegalArgumentException(fieldName + " inválido: " + value); }
+    }
+
+    private static String  resolveStr(   JsonNode d, String f, String  fallback) { return d.hasNonNull(f) ? d.get(f).asText()      : fallback; }
+    private static double  resolveDouble(JsonNode d, String f, double  fallback) { return d.hasNonNull(f) ? d.get(f).asDouble()    : fallback; }
+    private static int     resolveInt(   JsonNode d, String f, int     fallback) { return d.hasNonNull(f) ? d.get(f).asInt()       : fallback; }
+    private static boolean resolveBool(  JsonNode d, String f, boolean fallback) { return d.hasNonNull(f) ? d.get(f).asBoolean()   : fallback; }
+
     private void updateLocalConfigVersion(Long configVersion) {
         if (configVersion == null) return;
         LocalConfigState state = configStateRepository
@@ -297,7 +402,7 @@ public class MqttConfigDeltaListenerService implements MqttCallbackExtended {
             ack.put("galponId",     configuredGalponId);
             ack.put(FIELD_CFG_VER,  configVersion);
             ack.put("status",       status);
-            ack.put("message",      msgText);
+            ack.put(FIELD_MESSAGE,  msgText);
             ack.put("appliedAt",    OffsetDateTime.now().toString());
             String json = objectMapper.writeValueAsString(ack);
             publishOrQueue(ackTopic, json);

@@ -45,6 +45,12 @@ public class MortalityRecord {
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
+    @Column(name = "central_record_id")
+    private Long centralRecordId;
+
+    @Column(name = "sync_status", length = 20)
+    private String syncStatus = "PENDING";
+
     protected MortalityRecord() {
     }
 
@@ -95,7 +101,17 @@ public class MortalityRecord {
         this.observations = observations;
     }
 
+    public void setTotalCount(Integer totalCount) {
+        this.totalCount = totalCount;
+    }
+
     public OffsetDateTime getCreatedAt() {
         return createdAt;
     }
+
+    public Long getCentralRecordId() { return centralRecordId; }
+    public void setCentralRecordId(Long centralRecordId) { this.centralRecordId = centralRecordId; }
+
+    public String getSyncStatus() { return syncStatus; }
+    public void setSyncStatus(String syncStatus) { this.syncStatus = syncStatus; }
 }

@@ -14,4 +14,6 @@ public interface ConsumptionRecordRepository extends JpaRepository<ConsumptionRe
     List<ConsumptionRecord> findByFlockIdOrderByRecordDateDesc(Long flockId);
 
     Optional<ConsumptionRecord> findFirstByFlockIdOrderByRecordDateDescCreatedAtDesc(Long flockId);
+
+    Optional<ConsumptionRecord> findByCentralRecordId(Long centralRecordId);
 }

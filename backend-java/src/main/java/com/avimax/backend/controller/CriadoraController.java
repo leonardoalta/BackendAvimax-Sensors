@@ -10,6 +10,7 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -38,6 +39,15 @@ public class CriadoraController {
     @GetMapping
     public ApiResponse<List<CriadoraItemResponse>> list() {
         return ApiResponse.success(criadoraService.listWithProgramming());
+    }
+
+    @PatchMapping("/{criadoraId}/enabled")
+    public ApiResponse<CriadoraItemResponse> setEnabled(
+            @PathVariable Long criadoraId,
+            @RequestParam boolean enabled
+    ) {
+        var updated = criadoraService.setEnabled(criadoraId, enabled);
+        return ApiResponse.success(CriadoraItemResponse.from(updated, null));
     }
 
     @PutMapping("/{criadoraId}/programming")

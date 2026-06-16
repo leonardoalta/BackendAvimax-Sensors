@@ -50,4 +50,6 @@ public interface WeightRecordRepository extends JpaRepository<WeightRecord, Long
      * Find all weight records ordered by date descending
      */
     List<WeightRecord> findAllByOrderByRecordDateDesc();
+
+    Optional<WeightRecord> findByCentralRecordId(Long centralRecordId);
 }

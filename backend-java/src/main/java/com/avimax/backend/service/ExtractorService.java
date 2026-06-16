@@ -9,6 +9,7 @@ import com.avimax.backend.repository.ExtractorProgrammingRepository;
 import com.avimax.backend.repository.ExtractorProgrammingHistoryRepository;
 import com.avimax.backend.repository.ExtractorRepository;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,9 @@ public class ExtractorService {
     private final ExtractorProgrammingRepository extractorProgrammingRepository;
     private final ExtractorProgrammingHistoryRepository extractorProgrammingHistoryRepository;
 
+    @Autowired(required = false)
+    private LocalSyncMqttPublisherService syncPublisher;
+
     public ExtractorService(ExtractorRepository extractorRepository, ExtractorProgrammingRepository extractorProgrammingRepository, ExtractorProgrammingHistoryRepository extractorProgrammingHistoryRepository) {
         this.extractorRepository = extractorRepository;
         this.extractorProgrammingRepository = extractorProgrammingRepository;
@@ -30,7 +34,25 @@ public class ExtractorService {
 
     @Transactional
     public Extractor create(CreateExtractorRequest request) {
-        return extractorRepository.save(new Extractor(request.name()));
+        Extractor extractor = new Extractor(request.name());
+        if (request.codeName() != null && !request.codeName().isBlank()) {
+            extractor.setCodeName(request.codeName().toUpperCase().strip());
+        }
+        Extractor saved = extractorRepository.save(extractor);
+        if (syncPublisher != null) syncPublisher.publishActuatorUpsert(saved, "ACTUATOR_CREATED");
+        return saved;
+    }
+
+    @Transactional
+    public Extractor setEnabled(Long extractorId, boolean enabled) {
+        Extractor extractor = extractorRepository.findById(extractorId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Extractor no encontrado"));
+        extractor.setEnabled(enabled);
+        Extractor saved = extractorRepository.save(extractor);
+        if (syncPublisher != null) {
+            syncPublisher.publishActuatorUpsert(saved, enabled ? "ACTUATOR_ENABLED" : "ACTUATOR_DISABLED");
+        }
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -76,6 +98,10 @@ public class ExtractorService {
         }
 
         extractorProgrammingHistoryRepository.save(new com.avimax.backend.entity.ExtractorProgrammingHistory(extractor, saved.getTemperatureOn(), saved.getTemperatureOff()));
+        if (syncPublisher != null) {
+            syncPublisher.publishProgrammingChanged("EXTRACTOR", extractor.getCodeName(),
+                    saved.getTemperatureOn(), saved.getTemperatureOff(), null);
+        }
         return saved;
     }
 }

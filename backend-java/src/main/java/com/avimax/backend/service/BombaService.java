@@ -9,6 +9,7 @@ import com.avimax.backend.repository.BombaProgrammingRepository;
 import com.avimax.backend.repository.BombaProgrammingHistoryRepository;
 import com.avimax.backend.repository.BombaRepository;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,9 @@ public class BombaService {
     private final BombaProgrammingRepository bombaProgrammingRepository;
     private final BombaProgrammingHistoryRepository bombaProgrammingHistoryRepository;
 
+    @Autowired(required = false)
+    private LocalSyncMqttPublisherService syncPublisher;
+
     public BombaService(BombaRepository bombaRepository, BombaProgrammingRepository bombaProgrammingRepository, BombaProgrammingHistoryRepository bombaProgrammingHistoryRepository) {
         this.bombaRepository = bombaRepository;
         this.bombaProgrammingRepository = bombaProgrammingRepository;
@@ -30,7 +34,25 @@ public class BombaService {
 
     @Transactional
     public Bomba create(CreateBombaRequest request) {
-        return bombaRepository.save(new Bomba(request.name()));
+        Bomba bomba = new Bomba(request.name());
+        if (request.codeName() != null && !request.codeName().isBlank()) {
+            bomba.setCodeName(request.codeName().toUpperCase().strip());
+        }
+        Bomba saved = bombaRepository.save(bomba);
+        if (syncPublisher != null) syncPublisher.publishActuatorUpsert(saved, "ACTUATOR_CREATED");
+        return saved;
+    }
+
+    @Transactional
+    public Bomba setEnabled(Long bombaId, boolean enabled) {
+        Bomba bomba = bombaRepository.findById(bombaId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Bomba no encontrada"));
+        bomba.setEnabled(enabled);
+        Bomba saved = bombaRepository.save(bomba);
+        if (syncPublisher != null) {
+            syncPublisher.publishActuatorUpsert(saved, enabled ? "ACTUATOR_ENABLED" : "ACTUATOR_DISABLED");
+        }
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -77,6 +99,10 @@ public class BombaService {
         }
 
         bombaProgrammingHistoryRepository.save(new com.avimax.backend.entity.BombaProgrammingHistory(bomba, saved.getTemperatureOn(), saved.getTemperatureOff(), saved.getWorkDurationSeconds()));
+        if (syncPublisher != null) {
+            syncPublisher.publishProgrammingChanged("BOMBA", bomba.getCodeName(),
+                    saved.getTemperatureOn(), saved.getTemperatureOff(), saved.getWorkDurationSeconds());
+        }
         return saved;
     }
 }

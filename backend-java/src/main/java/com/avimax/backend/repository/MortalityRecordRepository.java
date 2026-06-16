@@ -12,4 +12,5 @@ public interface MortalityRecordRepository extends JpaRepository<MortalityRecord
     List<MortalityRecord> findByFlockIdOrderByRecordDateDesc(Long flockId);
     List<MortalityRecord> findByFlockIdAndRecordDateBetweenOrderByRecordDateDesc(Long flockId, LocalDate from, LocalDate to);
     Optional<MortalityRecord> findByFlockIdAndRecordDate(Long flockId, LocalDate recordDate);
+    Optional<MortalityRecord> findByCentralRecordId(Long centralRecordId);
 }

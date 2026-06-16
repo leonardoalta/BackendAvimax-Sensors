@@ -13,4 +13,6 @@ public interface AlarmRepository extends JpaRepository<Alarm, Long> {
     List<Alarm> findByStatusInOrderByActivatedAtDesc(Collection<AlarmStatus> statuses);
 
     List<Alarm> findAllByOrderByActivatedAtDesc();
+
+    Optional<Alarm> findFirstByRuleNameAndStatusInOrderByActivatedAtDesc(String ruleName, Collection<AlarmStatus> statuses);
 }
