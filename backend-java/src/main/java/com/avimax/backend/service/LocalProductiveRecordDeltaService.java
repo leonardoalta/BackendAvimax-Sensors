@@ -5,11 +5,14 @@ import com.avimax.backend.entity.AlarmEvent;
 import com.avimax.backend.entity.AlarmEventType;
 import com.avimax.backend.entity.AlarmStatus;
 import com.avimax.backend.entity.ConsumptionRecord;
+import com.avimax.backend.entity.Flock;
+import com.avimax.backend.entity.FlockStatus;
 import com.avimax.backend.entity.MortalityRecord;
 import com.avimax.backend.entity.WeightRecord;
 import com.avimax.backend.repository.AlarmEventRepository;
 import com.avimax.backend.repository.AlarmRepository;
 import com.avimax.backend.repository.ConsumptionRecordRepository;
+import com.avimax.backend.repository.FlockRepository;
 import com.avimax.backend.repository.MortalityRecordRepository;
 import com.avimax.backend.repository.WeightRecordRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -18,7 +21,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.Set;
 
@@ -28,9 +33,9 @@ import java.util.Set;
  *
  * Entidades manejadas:
  *  - ALARM: ALARM_ACKNOWLEDGED, ALARM_CLOSED
- *  - MORTALITY_RECORD: MORTALITY_RECORD_UPDATED, MORTALITY_RECORD_DELETED_LOGICAL
- *  - WEIGHT_RECORD: WEIGHT_RECORD_UPDATED, WEIGHT_RECORD_DELETED_LOGICAL
- *  - CONSUMPTION_RECORD: CONSUMPTION_RECORD_UPDATED, CONSUMPTION_RECORD_DELETED_LOGICAL
+ *  - MORTALITY_RECORD: MORTALITY_RECORD_CREATED, MORTALITY_RECORD_UPDATED, MORTALITY_RECORD_DELETED_LOGICAL
+ *  - WEIGHT_RECORD: WEIGHT_RECORD_CREATED, WEIGHT_RECORD_UPDATED, WEIGHT_RECORD_DELETED_LOGICAL
+ *  - CONSUMPTION_RECORD: CONSUMPTION_RECORD_CREATED, CONSUMPTION_RECORD_UPDATED, CONSUMPTION_RECORD_DELETED_LOGICAL
  */
 @Service
 public class LocalProductiveRecordDeltaService {
@@ -42,23 +47,32 @@ public class LocalProductiveRecordDeltaService {
     private static final String SYNC_SYNCED                   = "SYNCED";
     private static final String FIELD_LOCAL_RECORD_ID         = "localRecordId";
     private static final String FIELD_CENTRAL_RECORD_ID       = "centralRecordId";
+    private static final String FIELD_OBSERVATIONS            = "observations";
+    private static final String FIELD_AVG_WEIGHT_GRAMS        = "averageWeightGrams";
+    private static final String FIELD_SAMPLE_SIZE             = "sampleSize";
+    private static final String FIELD_FEED_KG                 = "feedKg";
+    private static final String FIELD_GENDER                  = "gender";
+    private static final String FIELD_LOCATION                = "location";
 
-    private final AlarmRepository            alarmRepository;
-    private final AlarmEventRepository       alarmEventRepository;
-    private final MortalityRecordRepository  mortalityRecordRepository;
-    private final WeightRecordRepository     weightRecordRepository;
+    private final AlarmRepository             alarmRepository;
+    private final AlarmEventRepository        alarmEventRepository;
+    private final MortalityRecordRepository   mortalityRecordRepository;
+    private final WeightRecordRepository      weightRecordRepository;
     private final ConsumptionRecordRepository consumptionRecordRepository;
+    private final FlockRepository             flockRepository;
 
     public LocalProductiveRecordDeltaService(AlarmRepository alarmRepository,
                                               AlarmEventRepository alarmEventRepository,
                                               MortalityRecordRepository mortalityRecordRepository,
                                               WeightRecordRepository weightRecordRepository,
-                                              ConsumptionRecordRepository consumptionRecordRepository) {
+                                              ConsumptionRecordRepository consumptionRecordRepository,
+                                              FlockRepository flockRepository) {
         this.alarmRepository             = alarmRepository;
         this.alarmEventRepository        = alarmEventRepository;
         this.mortalityRecordRepository   = mortalityRecordRepository;
         this.weightRecordRepository      = weightRecordRepository;
         this.consumptionRecordRepository = consumptionRecordRepository;
+        this.flockRepository             = flockRepository;
     }
 
     // ── Alarmas ──────────────────────────────────────────────────────────────
@@ -107,6 +121,10 @@ public class LocalProductiveRecordDeltaService {
 
     @Transactional
     public String applyMortalityRecordDelta(String changeType, JsonNode data) {
+        if ("MORTALITY_RECORD_CREATED".equals(changeType)) {
+            return createMortalityRecordFromDelta(data);
+        }
+
         MortalityRecord mortality = findMortalityRecord(data);
         if (mortality == null) return "Registro de mortalidad no encontrado en delta";
 
@@ -117,8 +135,8 @@ public class LocalProductiveRecordDeltaService {
             return null;
         }
 
-        if (data.hasNonNull("quantity"))     mortality.setTotalCount(data.get("quantity").asInt());
-        if (data.hasNonNull("observations")) mortality.setObservations(data.get("observations").asText());
+        if (data.hasNonNull("quantity"))               mortality.setTotalCount(data.get("quantity").asInt());
+        if (data.hasNonNull(FIELD_OBSERVATIONS)) mortality.setObservations(data.get(FIELD_OBSERVATIONS).asText());
         mortality.setSyncStatus(SYNC_SYNCED);
         mortalityRecordRepository.save(mortality);
         log.info("[ProductiveDelta] Mortalidad id={} actualizada desde central", mortality.getId());
@@ -129,6 +147,10 @@ public class LocalProductiveRecordDeltaService {
 
     @Transactional
     public String applyWeightRecordDelta(String changeType, JsonNode data) {
+        if ("WEIGHT_RECORD_CREATED".equals(changeType)) {
+            return createWeightRecordFromDelta(data);
+        }
+
         WeightRecord weight = findWeightRecord(data);
         if (weight == null) return "Registro de peso no encontrado en delta";
 
@@ -139,8 +161,8 @@ public class LocalProductiveRecordDeltaService {
             return null;
         }
 
-        if (data.hasNonNull("averageWeightGrams")) weight.setAverageWeight(data.get("averageWeightGrams").asDouble());
-        if (data.hasNonNull("sampleSize"))         weight.setSampledBirdsCount(data.get("sampleSize").asInt());
+        if (data.hasNonNull(FIELD_AVG_WEIGHT_GRAMS)) weight.setAverageWeight(data.get(FIELD_AVG_WEIGHT_GRAMS).asDouble());
+        if (data.hasNonNull(FIELD_SAMPLE_SIZE))      weight.setSampledBirdsCount(data.get(FIELD_SAMPLE_SIZE).asInt());
         weight.setSyncStatus(SYNC_SYNCED);
         weightRecordRepository.save(weight);
         log.info("[ProductiveDelta] Peso id={} actualizado desde central", weight.getId());
@@ -151,6 +173,10 @@ public class LocalProductiveRecordDeltaService {
 
     @Transactional
     public String applyConsumptionRecordDelta(String changeType, JsonNode data) {
+        if ("CONSUMPTION_RECORD_CREATED".equals(changeType)) {
+            return createConsumptionRecordFromDelta(data);
+        }
+
         ConsumptionRecord consumption = findConsumptionRecord(data);
         if (consumption == null) return "Registro de consumo no encontrado en delta";
 
@@ -161,11 +187,102 @@ public class LocalProductiveRecordDeltaService {
             return null;
         }
 
-        if (data.hasNonNull("feedKg")) consumption.setTotalConsumptionKg(data.get("feedKg").asDouble());
+        if (data.hasNonNull(FIELD_FEED_KG)) consumption.setTotalConsumptionKg(data.get(FIELD_FEED_KG).asDouble());
         consumption.setSyncStatus(SYNC_SYNCED);
         consumptionRecordRepository.save(consumption);
         log.info("[ProductiveDelta] Consumo id={} actualizado desde central", consumption.getId());
         return null;
+    }
+
+    // ── Creación de registros desde central ───────────────────────────────────
+
+    private String createWeightRecordFromDelta(JsonNode data) {
+        Flock flock = flockRepository.findFirstByStatus(FlockStatus.ACTIVE).orElse(null);
+        if (flock == null) return "Sin parvada activa en Raspberry para registrar peso desde central";
+
+        Long centralRecordId = data.hasNonNull(FIELD_CENTRAL_RECORD_ID) ? data.get(FIELD_CENTRAL_RECORD_ID).asLong() : null;
+        if (centralRecordId != null && weightRecordRepository.findByCentralRecordId(centralRecordId).isPresent()) {
+            log.info("[ProductiveDelta] Peso centralRecordId={} ya existe localmente — omitido", centralRecordId);
+            return null;
+        }
+
+        Double avgWeight   = data.hasNonNull(FIELD_AVG_WEIGHT_GRAMS) ? data.get(FIELD_AVG_WEIGHT_GRAMS).asDouble() : null;
+        Integer sampleSize = data.hasNonNull(FIELD_SAMPLE_SIZE)      ? data.get(FIELD_SAMPLE_SIZE).asInt()      : null;
+        if (avgWeight == null || sampleSize == null) return FIELD_AVG_WEIGHT_GRAMS + " y " + FIELD_SAMPLE_SIZE + " requeridos para WEIGHT_RECORD_CREATED";
+
+        int ageDays = data.hasNonNull("ageDays") ? data.get("ageDays").asInt() : 0;
+        LocalDate recordDate = parseDate(data, "recordDate");
+
+        WeightRecord.Gender gender = WeightRecord.Gender.MALE;
+        if (data.hasNonNull(FIELD_GENDER)) {
+            try { gender = WeightRecord.Gender.valueOf(data.get(FIELD_GENDER).asText().toUpperCase()); }
+            catch (IllegalArgumentException ignored) { log.warn("[ProductiveDelta] Género desconocido '{}', usando MALE", data.get(FIELD_GENDER).asText()); }
+        }
+        WeightRecord.WeightLocation location = WeightRecord.WeightLocation.PANEL;
+        if (data.hasNonNull(FIELD_LOCATION)) {
+            try { location = WeightRecord.WeightLocation.valueOf(data.get(FIELD_LOCATION).asText().toUpperCase()); }
+            catch (IllegalArgumentException ignored) { log.warn("[ProductiveDelta] Ubicación desconocida '{}', usando PANEL", data.get(FIELD_LOCATION).asText()); }
+        }
+
+        WeightRecord weight = new WeightRecord(flock, sampleSize, avgWeight, ageDays, recordDate, gender, location);
+        weight.setCentralRecordId(centralRecordId);
+        weight.setSyncStatus(SYNC_SYNCED);
+        weightRecordRepository.save(weight);
+        log.info("[ProductiveDelta] Peso creado localmente desde central centralRecordId={}", centralRecordId);
+        return null;
+    }
+
+    private String createMortalityRecordFromDelta(JsonNode data) {
+        Flock flock = flockRepository.findFirstByStatus(FlockStatus.ACTIVE).orElse(null);
+        if (flock == null) return "Sin parvada activa en Raspberry para registrar mortalidad desde central";
+
+        Long centralRecordId = data.hasNonNull(FIELD_CENTRAL_RECORD_ID) ? data.get(FIELD_CENTRAL_RECORD_ID).asLong() : null;
+        if (centralRecordId != null && mortalityRecordRepository.findByCentralRecordId(centralRecordId).isPresent()) {
+            log.info("[ProductiveDelta] Mortalidad centralRecordId={} ya existe localmente — omitido", centralRecordId);
+            return null;
+        }
+
+        int maleCount   = data.hasNonNull("maleCount")   ? data.get("maleCount").asInt()   : 0;
+        int femaleCount = data.hasNonNull("femaleCount")  ? data.get("femaleCount").asInt()  : 0;
+        String observations = data.hasNonNull(FIELD_OBSERVATIONS) ? data.get(FIELD_OBSERVATIONS).asText() : null;
+
+        MortalityRecord mortality = new MortalityRecord(flock, maleCount, femaleCount, observations);
+        mortality.setCentralRecordId(centralRecordId);
+        mortality.setSyncStatus(SYNC_SYNCED);
+        mortalityRecordRepository.save(mortality);
+        log.info("[ProductiveDelta] Mortalidad creada localmente desde central centralRecordId={}", centralRecordId);
+        return null;
+    }
+
+    private String createConsumptionRecordFromDelta(JsonNode data) {
+        Flock flock = flockRepository.findFirstByStatus(FlockStatus.ACTIVE).orElse(null);
+        if (flock == null) return "Sin parvada activa en Raspberry para registrar consumo desde central";
+
+        Long centralRecordId = data.hasNonNull(FIELD_CENTRAL_RECORD_ID) ? data.get(FIELD_CENTRAL_RECORD_ID).asLong() : null;
+        if (centralRecordId != null && consumptionRecordRepository.findByCentralRecordId(centralRecordId).isPresent()) {
+            log.info("[ProductiveDelta] Consumo centralRecordId={} ya existe localmente — omitido", centralRecordId);
+            return null;
+        }
+
+        double feedKg      = data.hasNonNull(FIELD_FEED_KG) ? data.get(FIELD_FEED_KG).asDouble() : 0.0;
+        LocalDate recordDate = parseDate(data, "recordDate");
+        int ageDays = (int) ChronoUnit.DAYS.between(flock.getFlockDate(), recordDate);
+        int birdsCount = flock.getTotalBirds() != null && flock.getTotalBirds() > 0 ? flock.getTotalBirds() : 1;
+        double perBird = feedKg / birdsCount;
+
+        ConsumptionRecord consumption = new ConsumptionRecord(flock, ageDays, recordDate, feedKg, birdsCount, perBird);
+        consumption.setCentralRecordId(centralRecordId);
+        consumption.setSyncStatus(SYNC_SYNCED);
+        consumptionRecordRepository.save(consumption);
+        log.info("[ProductiveDelta] Consumo creado localmente desde central centralRecordId={}", centralRecordId);
+        return null;
+    }
+
+    private static LocalDate parseDate(JsonNode data, String field) {
+        if (data.hasNonNull(field)) {
+            try { return LocalDate.parse(data.get(field).asText()); } catch (Exception ignored) { }
+        }
+        return LocalDate.now();
     }
 
     // ── Helpers de búsqueda ───────────────────────────────────────────────────
